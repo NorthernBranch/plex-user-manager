@@ -105,7 +105,9 @@ test('communications navigation, UTC draft fields and offline controls', async (
 }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Communications', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Communications', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Communications', level: 1, exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'New announcement' }).click();
   await page.getByLabel('Message subject', { exact: true }).fill('Synthetic announcement');
   await page.getByLabel('Plain-text message body', { exact: true }).fill('Synthetic message.');
