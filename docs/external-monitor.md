@@ -27,6 +27,10 @@ The worker checks every 30 seconds by default. It allows 90 seconds for a heartb
 
 Configure matching maintenance windows in the worker file **in advance**, especially for planned whole-host downtime. A received maintenance heartbeat pauses observation without pretending to recover an existing incident, but missed heartbeats cannot deliver updated maintenance settings during an outage. The worker’s independently provisioned UTC windows suppress email. Settings and recipients are not synchronised; restart the worker after configuration edits. Keep local authority external during testing and all planned outages.
 
+Use **Communications → Messages → External worker configuration** to copy the effective local windows (including confirmed events) into the worker's private `monitor.maintenance`. Manually provision the same outage/recovery recipient addresses and preferences in `monitor.recipients`; linked contacts are not automatically copied. Apply NAS recipient opt-outs to this file too. Restart the worker after edits. This is a manual workflow, not an authenticated settings-sync feature.
+
+Upgraded workers return nonce-bound HMAC-signed digests for effective maintenance and recipient configuration with accepted heartbeats. Communications displays last authenticated matches/mismatches and the acknowledgement time. Old workers or responses without a valid signature are **unknown**, never assumed matching. A heartbeat can be accepted while configuration differs. Compare while both hosts are reachable, before an outage. Worker SMTP, thresholds and other settings still require operator review; the digests compare only windows and outage/recovery recipients/preferences. The worker keeps independently provisioned configuration during NAS downtime and does not send local announcements, welcome/expiry reminders or maintenance communications. See [communications](communications.md).
+
 ## Delivery test and inspection
 
 The same image includes `dist/server/worker-admin.js`. Queue a single synthetic or administrator-approved test to the worker’s own SMTP service:

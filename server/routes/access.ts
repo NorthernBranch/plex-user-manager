@@ -8,9 +8,18 @@ const libraryIds = z
   .array(z.string().min(1).max(80))
   .max(200)
   .refine((v) => new Set(v).size === v.length);
-export function registerAccessRoutes({ app, store, client, selected, access }: AppServices) {
+export function registerAccessRoutes({
+  app,
+  store,
+  client,
+  selected,
+  access,
+  contacts,
+  communications,
+}: AppServices) {
   app.get('/api/users', async (_req, res) => {
     const snapshot = await access.snapshot();
+    communications.observe(snapshot.server, snapshot.users);
     const meta = store.all<{ user: string; notes: string }>(
       'SELECT user,notes FROM metadata WHERE server=?',
       snapshot.server,
@@ -19,10 +28,12 @@ export function registerAccessRoutes({ app, store, client, selected, access }: A
       ...snapshot,
       users: snapshot.users.map((user) => ({
         ...user,
+        contact:
+          contacts.list().find((c) => c.server === snapshot.server && c.user === user.id) ?? null,
         notes: meta.find((m) => m.user === user.id)?.notes ?? '',
         expiry:
           store.one(
-            'SELECT due,status,error FROM expiries WHERE server=? AND user=?',
+            "SELECT due,status,error,revision FROM expiries WHERE server=? AND user=? AND status<>'cancelled'",
             snapshot.server,
             user.id,
           ) ?? null,
@@ -85,21 +96,34 @@ export function registerAccessRoutes({ app, store, client, selected, access }: A
           user,
           body.notes,
         );
-        const existing = store.one<{ due: number }>(
-          'SELECT due FROM expiries WHERE server=? AND user=?',
+        const existing = store.one<{ due: number; status: string }>(
+          'SELECT due,status FROM expiries WHERE server=? AND user=?',
           server,
           user,
         );
-        if (body.expires && existing?.due !== Date.parse(body.expires))
+        if (
+          body.expires &&
+          (existing?.due !== Date.parse(body.expires) || existing?.status === 'cancelled')
+        )
           store.run(
-            "INSERT INTO expiries(server,user,due,status) VALUES(?,?,?,'pending') ON CONFLICT(server,user) DO UPDATE SET due=excluded.due,status='pending',attempts=0,next=0,error=NULL",
+            "INSERT INTO expiries(server,user,due,status) VALUES(?,?,?,'pending') ON CONFLICT(server,user) DO UPDATE SET due=excluded.due,status='pending',attempts=0,next=0,error=NULL,revision=expiries.revision+1",
             server,
             user,
             Date.parse(body.expires),
           );
         else if (!body.expires)
-          store.run('DELETE FROM expiries WHERE server=? AND user=?', server, user);
+          store.run(
+            "UPDATE expiries SET status='cancelled',revision=revision+1,error=NULL WHERE server=? AND user=? AND status<>'cancelled'",
+            server,
+            user,
+          );
         store.audit('metadata.update', user, 'notes and expiry saved');
+        if (
+          !body.expires ||
+          existing?.due !== Date.parse(body.expires) ||
+          existing?.status === 'cancelled'
+        )
+          communications.invalidateExpiry(server, user);
       });
       res.json({ ok: true });
     }),

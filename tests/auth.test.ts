@@ -53,6 +53,10 @@ describe('administrator boundary', () => {
       '/api/deliveries',
       '/api/plex/servers',
       '/api/presets',
+      '/api/contacts',
+      '/api/communications',
+      '/api/communications/history',
+      '/api/communications/maintenance-export',
     ])
       await request(f.app).get(url).expect(401);
     for (const url of [
@@ -62,6 +66,10 @@ describe('administrator boundary', () => {
       '/api/bulk/apply',
       '/api/smtp/test',
       '/api/password',
+      '/api/contacts',
+      '/api/communications/drafts',
+      '/api/communications/jobs/synthetic/retry',
+      '/api/users/11/welcome',
     ])
       await request(f.app).post(url).set('Origin', 'http://localhost:3000').send({}).expect(401);
   });
@@ -74,6 +82,8 @@ describe('administrator boundary', () => {
         bootstrap: f.bootstrap,
       });
     await agent.put('/api/monitor').set('Origin', 'http://localhost:3000').send({}).expect(403);
+    for (const url of ['/api/contacts', '/api/communications/drafts', '/api/users/11/welcome'])
+      await agent.post(url).set('Origin', 'http://localhost:3000').send({}).expect(403);
     await agent
       .post('/api/logout')
       .set('Origin', 'https://attacker.example.com')

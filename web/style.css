@@ -555,3 +555,14 @@ dd {
     padding: 1rem;
   }
 }
+.plain-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  background: #111e30;
+  padding: 1rem;
+  border-radius: 0.6rem;
+}
+select[multiple] {
+  min-height: 8rem;
+}

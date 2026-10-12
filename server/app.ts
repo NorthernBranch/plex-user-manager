@@ -14,6 +14,9 @@ import { Monitor } from './monitor.js';
 import { registerIntegrationRoutes } from './routes/integration.js';
 import { registerAccessRoutes } from './routes/access.js';
 import { registerMonitoringRoutes } from './routes/monitoring.js';
+import { registerCommunicationRoutes, registerRecipientRoutes } from './routes/communications.js';
+import { Contacts } from './contacts.js';
+import { Communications } from './communications.js';
 
 export function createApp(store: Store, config: Config, injected?: PlexAdapter) {
   const app = express(),
@@ -56,6 +59,8 @@ export function createApp(store: Store, config: Config, injected?: PlexAdapter) 
   app.post('/api/login', auth.rateLimit.bind(auth), (req, res) =>
     res.json(auth.login(req.body, res)),
   );
+  const recipientRouter = express.Router();
+  app.use('/api/recipient', recipientRouter);
   app.use('/api', auth.session.bind(auth));
   app.use('/api', (req, res, next) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -82,6 +87,11 @@ export function createApp(store: Store, config: Config, injected?: PlexAdapter) 
     return value;
   };
   const access = new Access(store, client, () => selected().id);
+  store.set('publicUrl', config.url);
+  const contacts = new Contacts(store, email, config.url, client, () => selected().id);
+  const communications = new Communications(store, email, client, selected);
+  email.setGuard((row, now) => communications.deliveryGuard(row, now));
+  registerRecipientRoutes(recipientRouter, contacts);
   app.get('/api/session', (_req, res) => res.json({ csrf: res.locals.csrf }));
   app.post('/api/logout', (req, res) => {
     auth.logout(req, res);
@@ -92,10 +102,22 @@ export function createApp(store: Store, config: Config, injected?: PlexAdapter) 
     auth.logout(req, res);
     res.json({ ok: true });
   });
-  const services = { app, store, config, client, selected, access, monitor, email };
+  const services = {
+    app,
+    store,
+    config,
+    client,
+    selected,
+    access,
+    monitor,
+    email,
+    contacts,
+    communications,
+  };
   registerIntegrationRoutes(services);
   registerAccessRoutes(services);
   registerMonitoringRoutes(services);
+  registerCommunicationRoutes(services);
   app.use('/api', (_req, _res, next) =>
     next(new AppError(404, 'NOT_FOUND', 'API route not found.')),
   );
@@ -122,5 +144,5 @@ export function createApp(store: Store, config: Config, injected?: PlexAdapter) 
       });
     },
   );
-  return { app, access, monitor, email, client, selected };
+  return { app, access, monitor, email, client, selected, contacts, communications };
 }

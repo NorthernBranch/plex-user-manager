@@ -101,7 +101,11 @@ export const monitorSchema = z
     maintenance: z
       .array(
         z
-          .object({ start: z.iso.datetime(), end: z.iso.datetime() })
+          .object({
+            start: z.iso.datetime(),
+            end: z.iso.datetime(),
+            eventId: z.string().optional(),
+          })
           .refine((v) => v.end > v.start, 'End must follow start.'),
       )
       .max(50),

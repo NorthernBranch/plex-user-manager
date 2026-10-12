@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { monitorSchema, smtpSchema, heartbeatSchema } from '../config.js';
 import { AppError } from '../errors.js';
 import type { AppServices } from './context.js';
-export function registerMonitoringRoutes({ app, store, monitor, email }: AppServices) {
+export function registerMonitoringRoutes({ app, store, monitor, email, contacts }: AppServices) {
   app.get('/api/monitor', (_req, res) =>
     res.json({
       state: monitor.state(),
@@ -31,7 +31,13 @@ export function registerMonitoringRoutes({ app, store, monitor, email }: AppServ
         'HEARTBEAT',
         'Configure the external worker and wait for a successfully accepted heartbeat before making it the alert authority.',
       );
-    store.set('monitor', settings);
+    store.transaction(() => {
+      store.set('monitor', {
+        ...settings,
+        maintenance: settings.maintenance.filter((w) => !w.eventId),
+      });
+      contacts.syncLegacy(settings.recipients);
+    });
     monitor.restart();
     store.audit('monitor.configure', 'monitor', 'saved');
     res.json({ ok: true });

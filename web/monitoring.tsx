@@ -165,8 +165,9 @@ export function Monitoring({
           </Card>
           <Card title="Maintenance windows">
             <p>
-              One-time windows in UTC suppress notifications. No delayed outage is sent when
-              maintenance ends. Plan recurring windows by adding explicit future dates.
+              UTC windows suppress outage notifications. If an outage remains active when a window
+              ends, monitoring resumes alerts. Manage titled events and advance notices in
+              Communications. The end of a window does not prove recovery.
             </p>
             <Field label="Start (UTC)">
               <input
@@ -207,18 +208,22 @@ export function Monitoring({
             {draft.maintenance.map((w, i: number) => (
               <p key={i}>
                 {new Date(w.start).toISOString()} → {new Date(w.end).toISOString()}{' '}
-                <button
-                  type="button"
-                  className="text-button danger"
-                  onClick={() =>
-                    set(
-                      'maintenance',
-                      draft.maintenance.filter((_w, index: number) => index !== i),
-                    )
-                  }
-                >
-                  Remove
-                </button>
+                {w.eventId ? (
+                  <span className="muted">Managed in Communications</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-button danger"
+                    onClick={() =>
+                      set(
+                        'maintenance',
+                        draft.maintenance.filter((_w, index: number) => index !== i),
+                      )
+                    }
+                  >
+                    Remove
+                  </button>
+                )}
               </p>
             ))}
           </Card>

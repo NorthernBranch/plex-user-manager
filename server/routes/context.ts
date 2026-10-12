@@ -5,6 +5,8 @@ import type { PlexAdapter, SelectedServer } from '../plex.js';
 import type { Access } from '../access.js';
 import type { Monitor } from '../monitor.js';
 import type { EmailQueue } from '../email.js';
+import type { Contacts } from '../contacts.js';
+import type { Communications } from '../communications.js';
 export type AppServices = {
   app: Express;
   store: Store;
@@ -14,4 +16,6 @@ export type AppServices = {
   access: Access;
   monitor: Monitor;
   email: EmailQueue;
+  contacts: Contacts;
+  communications: Communications;
 };

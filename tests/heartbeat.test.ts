@@ -1,10 +1,112 @@
 import { describe, it, expect } from 'vitest';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { acceptHeartbeat, signature, sendHeartbeat } from '../server/heartbeat.js';
+import {
+  acceptHeartbeat,
+  signature,
+  sendHeartbeat,
+  heartbeatAcknowledgement,
+} from '../server/heartbeat.js';
 import { memory, monitorSettings } from './helpers.js';
 import { Monitor } from '../server/monitor.js';
 import { ExternalMonitor } from '../server/external-monitor.js';
+import { communicationFixture } from './communication-helpers.js';
 describe('external heartbeat boundary', () => {
+  it('does not show an old matching acknowledgement as current after local edits or time passes', async () => {
+    const f = communicationFixture(),
+      worker = memory(),
+      key = randomBytes(32).toString('hex');
+    try {
+      worker.set('monitor', f.store.get('monitor'));
+      f.store.setSecret('heartbeat', { url: 'https://monitor.example.com/heartbeat', key });
+      await sendHeartbeat(
+        f.store,
+        'healthy',
+        async (_url, init) =>
+          new Response(null, {
+            status: 204,
+            headers: heartbeatAcknowledgement(worker, JSON.parse(String(init?.body)).nonce, key),
+          }),
+      );
+      expect(f.communications.list().external).toMatchObject({
+        maintenanceMatch: true,
+        recipientsMatch: true,
+        stale: false,
+      });
+      f.store.set(
+        'monitor',
+        monitorSettings({
+          maintenance: [{ start: '2030-01-01T00:00:00.000Z', end: '2030-01-01T01:00:00.000Z' }],
+        }),
+      );
+      expect(f.communications.list().external).toMatchObject({
+        maintenanceMatch: false,
+        recipientsMatch: false,
+      });
+      const status = f.store.get<Record<string, unknown>>('heartbeat.delivery')!;
+      f.store.set('heartbeat.delivery', { ...status, at: Date.now() - 300000 });
+      expect(f.communications.list().external).toMatchObject({
+        stale: true,
+        maintenanceMatch: null,
+        recipientsMatch: null,
+      });
+    } finally {
+      f.store.close();
+      worker.close();
+    }
+  });
+  it('authenticates configuration acknowledgements and displays mismatches or unknown state', async () => {
+    const local = memory(),
+      worker = memory(),
+      key = randomBytes(32).toString('hex');
+    try {
+      local.set('monitor', monitorSettings());
+      worker.set('monitor', monitorSettings());
+      local.setSecret('heartbeat', { url: 'https://monitor.example.com/heartbeat', key });
+      const respond = async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const nonce = JSON.parse(String(init?.body)).nonce as string;
+        return new Response(null, {
+          status: 204,
+          headers: heartbeatAcknowledgement(worker, nonce, key),
+        });
+      };
+      await sendHeartbeat(local, 'healthy', respond);
+      expect(local.get('heartbeat.delivery')).toMatchObject({
+        ok: true,
+        configurationAuthenticated: true,
+        maintenanceMatch: true,
+        recipientsMatch: true,
+      });
+      worker.set(
+        'monitor',
+        monitorSettings({
+          recipients: [],
+          maintenance: [{ start: '2030-01-01T00:00:00.000Z', end: '2030-01-01T01:00:00.000Z' }],
+        }),
+      );
+      await sendHeartbeat(local, 'healthy', respond);
+      expect(local.get('heartbeat.delivery')).toMatchObject({
+        maintenanceMatch: false,
+        recipientsMatch: false,
+      });
+      await sendHeartbeat(
+        local,
+        'healthy',
+        async () =>
+          new Response(null, {
+            status: 204,
+            headers: heartbeatAcknowledgement(worker, 'replayed-nonce', key),
+          }),
+      );
+      expect(local.get('heartbeat.delivery')).toMatchObject({
+        configurationAuthenticated: false,
+        maintenanceMatch: null,
+        recipientsMatch: null,
+      });
+    } finally {
+      local.close();
+      worker.close();
+    }
+  });
   it('rejects forged, stale and replayed heartbeats', () => {
     const db = memory(),
       key = randomBytes(32).toString('hex'),

@@ -102,6 +102,8 @@ In **Notifications**, enter the SMTP host/port, sender and optional authenticati
 
 In **Monitoring**, use the initial defaults: interval 30 seconds, timeout 10 seconds, continuous failure 300 seconds, recovery after two successful checks. Add administrator-defined recipients with separate outage/recovery preferences, plain-text templates and UTC maintenance windows. Save. Background checks run on the NAS even with the phone/browser closed. Review incidents, unknown restart gaps and delivery failures.
 
+For the new features, open **Communications** after SMTP is tested. In a confirmed user's editor, save its separate notification email and explicit categories, queue recipient links and have the recipient confirm verification. Their preferences page needs your configured HTTPS hostname reachable; it requires no admin account. Use Messages for draft/test/preview/confirmation, UTC announcements and titled maintenance events; manage those event windows there, rather than removing them in Monitoring. Use Automation to opt into welcome and expiry reminders, which default off. Existing recipients retain old outage/recovery behavior without being marked verified. Review [the step-by-step communications guide](communications.md) before enabling automated mail or upgrading an existing installation.
+
 ## 10. Add the PWA to a phone
 
 Visit the HTTPS origin and sign in. In a compatible Android browser, choose Install app/Add to Home screen. On iPhone/iPad Safari use Share → Add to Home Screen. Install UI varies by browser. Icons and an offline page are cached; no authenticated API, credentials or user data is cached. Offline access changes are disabled and never replayed later. The phone does not perform backend monitoring.
@@ -113,6 +115,8 @@ First use only test recipients and advise them. Stop only the Plex package/conta
 ## 12. Understand or enable outside monitoring
 
 A worker on this same NAS cannot email during whole-NAS, power or internet outages. Local monitoring still usefully detects Plex process/API failures. For host/network coverage, follow [the external worker walkthrough](external-monitor.md) on a separately powered outside host. Provision that host’s recipients, SMTP, keys and maintenance windows in advance; pair signed heartbeats; test its email; choose External notification authority locally to avoid duplicate senders. It detects heartbeat loss or reported local identity failure, not guaranteed playback. No Plex owner token leaves for the worker.
+
+Communications shows authenticated matching/mismatched/unknown worker maintenance and recipient digests. Copy its maintenance export into the private worker configuration and update recipients/preferences there before an outage, then restart the worker. NAS unsubscribe and recipient changes do not automatically update the outside host. Planned maintenance ending does not prove recovery; explicit completion notices are separate from monitored recovery.
 
 ## 13. Backup, upgrade, restore and troubleshoot
 

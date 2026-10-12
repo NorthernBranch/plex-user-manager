@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { defaultMonitor, type MonitorSettings } from './config.js';
+import { type MonitorSettings } from './config.js';
 import { Store } from './store.js';
+import { effectiveMonitorSettings } from './maintenance.js';
+import { notificationRecipients } from './recipients.js';
 
 export type HealthState =
   'healthy' | 'suspected failure' | 'confirmed outage' | 'recovery pending' | 'recovered';
@@ -33,7 +35,7 @@ export class Monitor {
     private local = true,
   ) {}
   settings() {
-    return this.store.get<MonitorSettings>('monitor') ?? defaultMonitor;
+    return effectiveMonitorSettings(this.store);
   }
   state(): State {
     return this.store.get<State>('health') ?? { state: 'healthy', successes: 0, unknown: true };
@@ -68,7 +70,10 @@ export class Monitor {
   ) {
     const suppressed =
       inMaintenance(settings, at) || (this.local && settings.authority === 'external');
-    for (const recipient of settings.recipients.filter((r) => r[kind])) {
+    const server = this.store.getSecret<{ id: string }>('server');
+    for (const recipient of notificationRecipients(this.store, settings, server?.id).filter(
+      (r) => r[kind],
+    )) {
       const replace = (template: string) =>
         template.replace(
           /\{\{(incident|started|recovered|downtime|scope)\}\}/g,
@@ -93,6 +98,16 @@ export class Monitor {
         suppressed ? 'suppressed' : 'pending',
         at,
       );
+      if (suppressed)
+        this.store.run(
+          'UPDATE deliveries SET error=? WHERE incident=? AND kind=? AND recipient=?',
+          inMaintenance(settings, at)
+            ? 'Suppressed by maintenance window.'
+            : 'Suppressed by external alert authority.',
+          incident.id,
+          kind,
+          recipient.email,
+        );
     }
   }
   observe(ok: boolean, now = Date.now()) {
@@ -143,6 +158,12 @@ export class Monitor {
             this.enqueue(incident, 'outage', now, settings);
           }
         } else {
+          if (!inMaintenance(settings, now) && (!this.local || settings.authority === 'local'))
+            this.store.run(
+              "UPDATE deliveries SET status='pending',next=?,error=NULL WHERE incident=? AND kind='outage' AND status='suppressed' AND error IN ('Suppressed by maintenance window.','Suppressed by maintenance or external alert authority.')",
+              now,
+              state.incident,
+            );
           if (state.state === 'recovery pending')
             this.event(now, 'Recovery failed; incident continues.', state.incident);
           state.state = 'confirmed outage';
@@ -164,7 +185,11 @@ export class Monitor {
             incident.id,
           );
           this.enqueue(incident, 'recovery', now, settings);
-          for (const recipient of settings.recipients.filter((r) => r.outage))
+          for (const recipient of notificationRecipients(
+            this.store,
+            settings,
+            this.store.getSecret<{ id: string }>('server')?.id,
+          ).filter((r) => r.outage))
             this.store.run(
               "UPDATE deliveries SET status='suppressed',error='No outage was delivered to this recipient.' WHERE incident=? AND recipient=? AND kind='recovery' AND status='pending' AND NOT EXISTS(SELECT 1 FROM deliveries o WHERE o.incident=deliveries.incident AND o.recipient=deliveries.recipient AND o.kind='outage' AND o.status IN ('sent','sending'))",
               incident.id,
