@@ -131,11 +131,28 @@ describe('durable email queue', () => {
     };
     const { db, queue } = fixture(sender);
     try {
+      for (const recipient of ['one@example.com', 'two@example.com'])
+        queue.enqueue({
+          key: 'synthetic-announcement',
+          kind: 'announcement',
+          recipient,
+          subject: 'Sample announcement',
+          body: 'Synthetic announcement body.',
+          now: 20000,
+        });
       await queue.drain(20000);
-      expect(envelopes).toHaveLength(2);
-      expect(envelopes.map((e) => e.to)).toEqual([['one@example.com'], ['two@example.com']]);
+      expect(envelopes).toHaveLength(4);
+      expect(envelopes.map((e) => e.to)).toEqual([
+        ['one@example.com'],
+        ['two@example.com'],
+        ['one@example.com'],
+        ['two@example.com'],
+      ]);
       expect(envelopes[0].text).not.toContain('two@example.com');
       expect(envelopes[1].text).not.toContain('one@example.com');
+      expect(envelopes[2].text).toContain('Sample announcement');
+      expect(envelopes[2].text).not.toContain('two@example.com');
+      expect(envelopes[3].text).not.toContain('one@example.com');
       expect(db.all<Delivery>('SELECT * FROM deliveries').every((d) => d.status === 'sent')).toBe(
         true,
       );

@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { seal, unseal } from './crypto.js';
+import { migrateCommunications, schemaVersion } from './migrations.js';
 
 export class Store {
   db: DatabaseSync;
@@ -14,7 +15,9 @@ export class Store {
     try {
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
       const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
-      if (version > 1) throw new Error('Database schema is newer than this application.');
+      if (version > schemaVersion)
+        throw new Error('Database schema is newer than this application.');
+      if (version > 0 && this.get<string>('keyCheck')) this.getSecret('keyCheck');
       if (version === 0)
         this.db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -31,6 +34,7 @@ export class Store {
       // Check deployment key before serving or consuming jobs. Wrong keys fail closed.
       if (this.get<string>('keyCheck')) this.getSecret('keyCheck');
       else this.setSecret('keyCheck', 'valid');
+      if (version < 2) migrateCommunications(this.db);
     } catch (error) {
       this.db.close();
       throw error;

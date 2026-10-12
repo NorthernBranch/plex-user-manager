@@ -13,6 +13,10 @@ An MIT-licensed, self-hosted administrator PWA for Plex library access and outag
 - Content-rating and allowed-label restrictions for shared accounts with Plex Pass, with explicit confirmation of account-wide scope.
 - Prefilled restriction editing, before/after previews and rejection of stale changes; unsupported existing filter syntax stays in Plex Web.
 - Persisted access expiries that process overdue work on startup, audit history and reconciliation with Plex before and after changes.
+- Stable-ID notification contacts, six independent preferences, scoped verification/preferences links and address-wide unsubscribe.
+- Announcement drafts with fixed audience previews, UTC schedules, per-recipient delivery checks and cancellation/history.
+- Titled maintenance events with advance notices, edits/extensions, optional cancellation/completion notices and shared monitoring suppression.
+- Conservative, opt-in welcome automation and revision-aware user/admin expiry reminders; failed revocation warns administrators only.
 - Backend monitoring with configurable thresholds, recovery confirmation, maintenance windows, recipients and plain-text templates.
 - Persisted incidents, observed downtime, unknown restart gaps and separate SMTP deliveries with bounded retries and visible failures.
 - Optional external heartbeat worker with its own persistence, SMTP and recipients, able to alert without contacting an unavailable NAS.
@@ -22,6 +26,8 @@ An MIT-licensed, self-hosted administrator PWA for Plex library access and outag
 ## Start here
 
 Follow [the Synology installation walkthrough](docs/synology.md) or [generic deployment](docs/deployment.md). No image has been published by this implementation. Build `plex-user-manager:local` from this repository on a Docker-capable host, or use a versioned image after an authorised release workflow runs.
+
+For an existing installation, follow [the communications upgrade and setup guide](docs/communications.md). Schema 2 preserves prior data and standalone alerts; welcome and expiry reminders start disabled. Back up the database and its matching encryption key before upgrading. No extra environment values are required.
 
 ```sh
 docker build --platform linux/amd64 -t plex-user-manager:local .
@@ -38,6 +44,8 @@ Managed-user creation, Plex Home membership, downloads permissions, Live TV, and
 Local monitoring proves only that the selected Plex identity API responded with the expected machine identity. It does not prove playback, external reachability or internet connectivity. A monitor running on a NAS cannot send during that NAS’s power, host or internet outage. The [external worker](docs/external-monitor.md) detects missed authenticated heartbeats and local Plex probe failures from a separate host; it does not test the public Plex playback path.
 
 SMTP retries can produce duplicates when acceptance is unknown. Each confirmed incident has one logical outage and one recovery entry per eligible recipient. Unsent outage messages become stale on recovery; recovery follows an accepted outage unless the recipient explicitly opted for recovery-only alerts. Maintenance suppression, preference changes and external alert authority can intentionally suppress delivery.
+
+Verification and consent are separate. Different Plex users sharing an address cannot receive account-specific welcome/user expiry messages. Automatic welcome requires the same observed account/share IDs across pending-to-accepted status; changed IDs and existing users require manual welcome. Maintenance's expected end does not prove recovery. External recipients/maintenance are provisioned independently and manually; authenticated digests show mismatches/unknown state, and NAS recipient opt-outs must also be applied to the worker. See [communications behavior and limitations](docs/communications.md).
 
 Linux amd64 is the prepared image target. The base supports arm64, but this repository does not publish or claim a verified arm64 build. SQLite and secrets must persist on local storage. Run exactly one application process per database.
 

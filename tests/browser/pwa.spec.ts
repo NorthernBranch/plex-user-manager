@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { Restrictions } from '../../server/plex.js';
+import { defaultCommunications } from '../../server/communications-config.js';
 const monitor = {
   enabled: true,
   intervalSeconds: 30,
@@ -43,6 +44,20 @@ test.beforeEach(async ({ page }) => {
       '/api/audit': [],
       '/api/presets': [],
       '/api/deliveries': [],
+      '/api/communications': {
+        settings: defaultCommunications,
+        contacts: [],
+        campaigns: [],
+        jobs: [],
+        memberships: [],
+        external: null,
+        maintenanceExport: {
+          maintenance: [],
+          digest: 'synthetic-digest',
+          instructions: 'Provision the external worker before an outage.',
+        },
+      },
+      '/api/communications/history': [],
       '/api/users': {
         server: 'synthetic',
         libraries: [
@@ -83,6 +98,63 @@ test.beforeEach(async ({ page }) => {
       body: JSON.stringify(responses[path] ?? { ok: true }),
     });
   });
+});
+test('communications navigation, UTC draft fields and offline controls', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Communications', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Communications', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New announcement' }).click();
+  await page.getByLabel('Message subject', { exact: true }).fill('Synthetic announcement');
+  await page.getByLabel('Plain-text message body', { exact: true }).fill('Synthetic message.');
+  await context.setOffline(true);
+  await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Preview recipients & content' }),
+  ).not.toBeVisible();
+});
+test('recipient fragment is removed, GET is harmless and verification requires confirmation', async ({
+  page,
+  context,
+}) => {
+  const token = 'a'.repeat(64);
+  let verified = 0;
+  await page.route('**/api/recipient/**', async (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().url()).not.toContain(token);
+    expect(route.request().postDataJSON().token).toBe(token);
+    if (route.request().url().endsWith('/verify')) verified++;
+    await route.fulfill({
+      json: {
+        email: 'viewer@example.com',
+        verified: false,
+        unsubscribed: false,
+        preferences: {
+          outage: false,
+          recovery: false,
+          announcement: false,
+          maintenance: false,
+          welcome: false,
+          expiry: false,
+        },
+        scope: 'verify',
+        expires: Date.now() + 86400000,
+      },
+    });
+  });
+  await page.goto(`/recipient#token=${token}`);
+  await expect(page.getByText('Address: viewer@example.com')).toBeVisible();
+  expect(page.url()).not.toContain(token);
+  expect(verified).toBe(0);
+  expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Confirm address verification' }).click();
+  await expect(page.getByRole('status')).toContainText('Consent is unchanged');
+  expect(verified).toBe(1);
+  await context.setOffline(true);
+  await expect(page.getByRole('button', { name: 'Confirm address verification' })).toBeDisabled();
 });
 test('responsive dashboard, accessible editor and synthetic screenshot', async ({
   page,

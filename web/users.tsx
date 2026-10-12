@@ -94,6 +94,7 @@ export function Users({ notice, offline }: { notice: Notice; offline: boolean })
                 <th scope="col">Type</th>
                 <th scope="col">Access</th>
                 <th scope="col">Expiry</th>
+                <th scope="col">Contact</th>
               </tr>
             </thead>
             <tbody>
@@ -133,6 +134,29 @@ export function Users({ notice, offline }: { notice: Notice; offline: boolean })
                     {u.expiry
                       ? `${new Date(u.expiry.due).toLocaleDateString()} · ${u.expiry.status}`
                       : 'No expiry'}
+                  </td>
+                  <td>
+                    {u.contact ? (
+                      <>
+                        <span>{u.contact.email}</span>
+                        <br />
+                        <Badge>
+                          {u.contact.unsubscribed
+                            ? 'Unsubscribed'
+                            : u.contact.verified
+                              ? 'Verified'
+                              : 'Unverified'}
+                        </Badge>
+                        <small>
+                          {Object.entries(u.contact.preferences)
+                            .filter(([, on]) => on)
+                            .map(([key]) => key)
+                            .join(', ') || 'No categories enabled'}
+                        </small>
+                      </>
+                    ) : (
+                      'No notification contact'
+                    )}
                   </td>
                 </tr>
               ))}

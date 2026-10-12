@@ -188,7 +188,11 @@ export function Notifications({
                         d.status === 'sent' ? 'good' : d.status === 'failed' ? 'bad' : 'neutral'
                       }
                     >
-                      {d.status}
+                      {d.status === 'sent'
+                        ? 'SMTP accepted'
+                        : d.status === 'pending'
+                          ? 'Queued'
+                          : d.status}
                     </Badge>
                   </td>
                   <td>{d.attempts}</td>

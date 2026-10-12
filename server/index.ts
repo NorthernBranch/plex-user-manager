@@ -8,9 +8,13 @@ import { sendHeartbeat } from './heartbeat.js';
 try {
   const config = loadConfig(),
     store = new Store(join(config.dataDir, 'app.db'), config.key);
-  const { app, access, monitor, email, client, selected } = createApp(store, config);
+  const { app, access, monitor, email, client, selected, communications } = createApp(
+    store,
+    config,
+  );
   monitor.restart();
   email.restart();
+  communications.restart();
   let stopping = false;
   const server = app.listen(config.port, '0.0.0.0', () =>
     process.stdout.write('Plex User Manager is ready.\n'),
@@ -55,6 +59,18 @@ try {
   // Expiry traffic cannot delay Plex probes or outbound heartbeats.
   void expiries();
   const expiryTimer = setInterval(() => void expiries(), 10000);
+  const communicationsTick = () =>
+    void communications
+      .tick()
+      .catch(() =>
+        store.audit(
+          'communications.worker',
+          'scheduler',
+          'source unavailable; no successful dispatch assumed',
+        ),
+      );
+  communicationsTick();
+  const communicationsTimer = setInterval(communicationsTick, 10000);
   const deliveryTimer = setInterval(
     () =>
       void email.drain().catch(() => store.audit('email.worker', 'queue', 'worker unavailable')),
@@ -65,6 +81,7 @@ try {
     clearTimeout(timer);
     clearInterval(deliveryTimer);
     clearInterval(expiryTimer);
+    clearInterval(communicationsTimer);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 20000).unref();
   }

@@ -3,6 +3,7 @@ import { api } from './api';
 import { Badge, Field, Libraries } from './components';
 import type { Notice, Snapshot, User } from './types';
 import { RestrictionsEditor } from './restrictions-editor';
+import { ContactEditor } from './contact-editor';
 export function UserEditor({
   user,
   data,
@@ -25,6 +26,8 @@ export function UserEditor({
     ),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const [welcome, setWelcome] = useState<{ subject: string; body: string }>(),
+    [testRecipient, setTestRecipient] = useState('');
   async function run(fn: () => Promise<void | false>) {
     setBusy(true);
     setError('');
@@ -122,6 +125,74 @@ export function UserEditor({
       >
         Save notes & expiry
       </button>
+      <hr />
+      <ContactEditor
+        contact={user.contact}
+        userId={user.id}
+        pending={user.kind === 'pending'}
+        offline={offline || busy}
+        onSaved={refresh}
+      />
+      <h3>Welcome message</h3>
+      <p>
+        Automatic welcome requires an observed pending-to-accepted transition with the same account
+        and share IDs. Existing users are not automatically welcomed. This explicit send does not
+        infer invitation acceptance.
+      </p>
+      <button
+        className="secondary"
+        disabled={offline || busy || user.kind === 'pending'}
+        onClick={() =>
+          void run(async () => {
+            setWelcome(await api(`/users/${user.id}/welcome/preview`, {}));
+            return false as const;
+          })
+        }
+      >
+        Preview welcome
+      </button>
+      {welcome && (
+        <div className="preview">
+          <h4>{welcome.subject}</h4>
+          <p className="plain-text">{welcome.body}</p>
+          <Field label="Welcome test recipient">
+            <input
+              type="email"
+              value={testRecipient}
+              onChange={(e) => setTestRecipient(e.target.value)}
+            />
+          </Field>
+          <button
+            className="secondary"
+            disabled={offline || busy || !testRecipient}
+            onClick={() =>
+              void run(async () => {
+                await api(`/users/${user.id}/welcome/test`, {
+                  recipient: testRecipient,
+                  confirm: true,
+                });
+                notice('Welcome test queued.');
+              })
+            }
+          >
+            Queue welcome test
+          </button>
+          <button
+            disabled={offline || busy}
+            onClick={() => {
+              if (confirm('Queue an explicit welcome/resend to the verified, eligible contact?'))
+                void run(async () => {
+                  await api(`/users/${user.id}/welcome`, {
+                    requestId: crypto.randomUUID(),
+                    confirm: true,
+                  });
+                });
+            }}
+          >
+            Confirm welcome send/resend
+          </button>
+        </div>
+      )}
       <hr />
       <h3>Content restrictions</h3>
       <p>{data.capabilities.restrictionScope}</p>

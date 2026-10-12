@@ -8,6 +8,7 @@ export type User = {
   notes: string;
   filters: Record<string, string>;
   expiry: { due: number; status: string; error: string | null } | null;
+  contact?: import('../server/recipients').Contact | null;
 };
 export type Snapshot = {
   server: string;
@@ -22,7 +23,14 @@ export type Settings = {
   monitor: MonitorSettings;
   smtp: (SmtpSettings & { hasPassword: boolean }) | null;
   heartbeat: { url: string; key: string; hasKey: boolean } | null;
-  heartbeatDelivery: { at: number; ok: boolean } | null;
+  heartbeatDelivery: {
+    at: number;
+    ok: boolean;
+    configurationAuthenticated?: boolean;
+    stale?: boolean;
+    maintenanceMatch?: boolean | null;
+    recipientsMatch?: boolean | null;
+  } | null;
 };
 export type Health = {
   state: { state: string; unknown: boolean; last?: number; lastOk?: boolean };

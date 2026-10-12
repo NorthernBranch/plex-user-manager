@@ -7,9 +7,19 @@ import { Users } from './users';
 import { SettingsPage } from './settings';
 import { Notifications } from './notifications';
 import { Monitoring } from './monitoring';
+import { CommunicationsArea, CommunicationsSummary } from './communications';
+import { RecipientPage } from './recipient';
 import type { Health, Settings, AuditEntry } from './types';
 import './style.css';
-const tabs = ['Dashboard', 'Users', 'Monitoring', 'Notifications', 'Settings', 'Audit'];
+const tabs = [
+  'Dashboard',
+  'Users',
+  'Monitoring',
+  'Notifications',
+  'Communications',
+  'Settings',
+  'Audit',
+];
 function App() {
   const [initialized, setInitialized] = useState<boolean>(),
     [loggedIn, setLoggedIn] = useState(false),
@@ -112,7 +122,7 @@ function App() {
                 setMessage('');
               }}
             >
-              <span aria-hidden="true">{['◫', '♙', '◉', '✉', '⚙', '≡'][i]}</span>
+              <span aria-hidden="true">{['◫', '♙', '◉', '✉', '✎', '⚙', '≡'][i]}</span>
               {tab}
             </button>
           ))}
@@ -250,9 +260,11 @@ function App() {
                   ]}
                 />
               </Card>
+              <CommunicationsSummary open={() => setPage('Communications')} />
             </>
           )}
           {page === 'Users' && <Users notice={notice} offline={offline} />}
+          {page === 'Communications' && <CommunicationsArea offline={offline} notice={notice} />}
           {page === 'Settings' && (
             <SettingsPage
               settings={settings}
@@ -308,9 +320,14 @@ function App() {
     </div>
   );
 }
+const recipientRoute = window.location.pathname === '/recipient';
+const recipientToken = recipientRoute
+  ? (new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '')
+  : '';
+if (recipientRoute) history.replaceState(null, '', '/recipient');
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    {recipientRoute ? <RecipientPage token={recipientToken} /> : <App />}
   </React.StrictMode>,
 );
 if ('serviceWorker' in navigator)

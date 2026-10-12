@@ -1,14 +1,28 @@
 import nodemailer from 'nodemailer';
-import { type SmtpSettings, type MonitorSettings } from './config.js';
+import { type SmtpSettings } from './config.js';
 import { inMaintenance } from './monitor.js';
 import { Store } from './store.js';
 import { randomUUID } from 'node:crypto';
 import { AppError } from './errors.js';
+import { seal, unseal, hash } from './crypto.js';
+import { effectiveMonitorSettings } from './maintenance.js';
+import { notificationRecipients } from './recipients.js';
 
 export type Delivery = {
   id: number;
   incident: string;
-  kind: 'outage' | 'recovery' | 'test';
+  kind:
+    | 'outage'
+    | 'recovery'
+    | 'test'
+    | 'announcement'
+    | 'maintenance'
+    | 'welcome'
+    | 'expiry'
+    | 'expiry-admin'
+    | 'revocation-failure'
+    | 'verification'
+    | 'preference-link';
   recipient: string;
   subject: string;
   body: string;
@@ -17,6 +31,27 @@ export type Delivery = {
   next: number;
   error: string | null;
   sent: number | null;
+  context: string | null;
+  private_body: string | null;
+};
+export type DeliveryContext = {
+  source: string;
+  contactId?: string;
+  revision?: number;
+  tokenHash?: string;
+  server?: string;
+  user?: string;
+  shareId?: string;
+  generation?: number;
+  campaignId?: string;
+  category?: string;
+  personal?: boolean;
+  contactIds?: string[];
+  deadline?: number;
+  jobId?: string;
+  settingsRevision?: number;
+  logicalKey?: string;
+  lead?: number;
 };
 export type Sender = (
   config: SmtpSettings,
@@ -50,10 +85,48 @@ export const smtpSend: Sender = async (config, message) => {
 };
 export class EmailQueue {
   private active = false;
+  private guard?: (delivery: Delivery, now: number) => Promise<string | undefined>;
   constructor(
     private store: Store,
     private sender: Sender = smtpSend,
   ) {}
+  setGuard(guard: (delivery: Delivery, now: number) => Promise<string | undefined>) {
+    this.guard = guard;
+  }
+  enqueue(input: {
+    key: string;
+    kind: Delivery['kind'];
+    recipient: string;
+    subject: string;
+    body: string;
+    context?: DeliveryContext;
+    private?: boolean;
+    now?: number;
+    status?: string;
+    reason?: string;
+  }) {
+    if (/[\r\n]/.test(input.subject))
+      throw new AppError(400, 'HEADER', 'Email subject cannot contain line breaks.');
+    this.store.run(
+      'INSERT OR IGNORE INTO deliveries(incident,kind,recipient,subject,body,status,next,context,private_body,error) VALUES(?,?,?,?,?,?,?,?,?,?)',
+      input.key,
+      input.kind,
+      input.recipient.toLowerCase(),
+      input.subject,
+      input.private ? '' : input.body,
+      input.status ?? 'pending',
+      input.now ?? Date.now(),
+      input.context ? JSON.stringify(input.context) : null,
+      input.private ? seal(input.body, this.store.key) : null,
+      input.reason ?? null,
+    );
+    return this.store.one<{ id: number }>(
+      'SELECT id FROM deliveries WHERE incident=? AND kind=? AND recipient=?',
+      input.key,
+      input.kind,
+      input.recipient.toLowerCase(),
+    )!.id;
+  }
   restart(now = Date.now()) {
     // SMTP acceptance may have occurred before a crash. Retry with stable Message-ID; duplicates remain possible.
     this.store.run(
@@ -84,18 +157,23 @@ export class EmailQueue {
     if (!config) return;
     this.active = true;
     try {
+      const batch =
+        this.store.get<{ batchSize: number }>('communications.settings')?.batchSize ?? 5;
       const rows = this.store.all<Delivery>(
-        "SELECT * FROM deliveries WHERE status='pending' AND next<=? ORDER BY id LIMIT 20",
+        "SELECT * FROM deliveries WHERE status='pending' AND next<=? ORDER BY id LIMIT ?",
         now,
+        Math.min(20, Math.max(1, batch)),
       );
       for (const row of rows) {
         const current = this.store.one<Delivery>('SELECT * FROM deliveries WHERE id=?', row.id)!;
         if (current.status !== 'pending') continue;
-        const settings = this.store.get<MonitorSettings>('monitor');
-        const preference = settings?.recipients.find(
+        const settings = effectiveMonitorSettings(this.store);
+        const incidentMessage = row.kind === 'outage' || row.kind === 'recovery';
+        const selected = this.store.getSecret<{ id: string }>('server');
+        const preference = notificationRecipients(this.store, settings, selected?.id).find(
           (r) => r.email.toLowerCase() === row.recipient,
         );
-        if (row.kind !== 'test' && settings && (!preference || !preference[row.kind])) {
+        if (incidentMessage && (!preference || !preference[row.kind as 'outage' | 'recovery'])) {
           this.store.run(
             "UPDATE deliveries SET status='suppressed',error='Recipient notification preference changed.' WHERE id=?",
             row.id,
@@ -103,8 +181,7 @@ export class EmailQueue {
           continue;
         }
         if (
-          row.kind !== 'test' &&
-          settings &&
+          incidentMessage &&
           (inMaintenance(settings, now) || settings.authority === 'external')
         ) {
           this.store.run(
@@ -113,6 +190,33 @@ export class EmailQueue {
           );
           continue;
         }
+        try {
+          const reason = this.guard && row.kind !== 'test' ? await this.guard(row, now) : undefined;
+          if (reason) {
+            this.store.run(
+              "UPDATE deliveries SET status='suppressed',error=? WHERE id=? AND status='pending'",
+              reason,
+              row.id,
+            );
+            continue;
+          }
+        } catch {
+          const attempts = row.attempts + 1;
+          this.store.run(
+            "UPDATE deliveries SET status=?,attempts=?,next=?,error=? WHERE id=? AND status='pending'",
+            attempts >= 5 ? 'failed' : 'pending',
+            attempts,
+            now + Math.min(3600000, 30000 * 2 ** attempts),
+            'Eligibility check unavailable; no SMTP send attempted.',
+            row.id,
+          );
+          continue;
+        }
+        if (
+          this.store.one<{ status: string }>('SELECT status FROM deliveries WHERE id=?', row.id)
+            ?.status !== 'pending'
+        )
+          continue;
         if (row.kind === 'recovery') {
           const outage = this.store.one<Delivery>(
             "SELECT * FROM deliveries WHERE incident=? AND recipient=? AND kind='outage'",
@@ -136,14 +240,24 @@ export class EmailQueue {
           await this.sender(config, {
             to: row.recipient,
             subject: row.subject,
-            text: row.body,
-            messageId: `<${row.incident}.${row.kind}.${row.id}@plex-user-manager.invalid>`,
+            text: row.private_body ? unseal<string>(row.private_body, this.store.key) : row.body,
+            messageId: `<${hash(row.incident)}.${row.kind}.${row.id}@plex-user-manager.invalid>`,
           });
           this.store.run(
             "UPDATE deliveries SET status='sent',sent=?,error=NULL WHERE id=?",
             Date.now(),
             row.id,
           );
+          if (row.context) {
+            const c = JSON.parse(row.context) as DeliveryContext;
+            if (c.source === 'welcome')
+              this.store.run(
+                "UPDATE memberships SET welcome='sent' WHERE server=? AND share_id=? AND generation=?",
+                c.server!,
+                c.shareId!,
+                c.generation!,
+              );
+          }
         } catch {
           const recovered =
             row.kind === 'outage' &&

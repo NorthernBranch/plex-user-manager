@@ -7,7 +7,7 @@ import { secret, monitorSchema, smtpSchema } from './config.js';
 import { Store } from './store.js';
 import { Monitor } from './monitor.js';
 import { EmailQueue } from './email.js';
-import { acceptHeartbeat } from './heartbeat.js';
+import { acceptHeartbeat, heartbeatAcknowledgement } from './heartbeat.js';
 import { ExternalMonitor } from './external-monitor.js';
 
 try {
@@ -54,6 +54,8 @@ try {
     try {
       if (!acceptHeartbeat(store, req.body, req.get('x-heartbeat-signature') ?? '', heartbeatKey))
         return res.sendStatus(403);
+      const nonce = z.object({ nonce: z.uuid() }).parse(JSON.parse(req.body)).nonce;
+      res.set(heartbeatAcknowledgement(store, nonce, heartbeatKey));
       res.sendStatus(204);
     } catch {
       res.sendStatus(400);
