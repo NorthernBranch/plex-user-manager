@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Access } from '../server/access.js';
 import { MockPlex, memory } from './helpers.js';
 import { Store } from '../server/store.js';
@@ -6,7 +6,69 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { Plex } from '../server/plex.js';
 describe('access reconciliation', () => {
+  it('never completes expiry when the real adapter receives malformed absence evidence', async () => {
+    const db = memory();
+    let malformed = true;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) => {
+      expect(options?.method).toBe('GET');
+      return new Response(malformed ? '{}' : '<MediaContainer size="0"/>');
+    });
+    const adapter = new Plex('synthetic-token', 'test-client', fetcher);
+    const access = new Access(
+      db,
+      () => adapter,
+      () => 'synthetic',
+    );
+    try {
+      db.run("INSERT INTO expiries(server,user,due,status) VALUES('synthetic','11',10,'pending')");
+      await access.expire(100);
+      expect(
+        db.one<{ status: string; attempts: number }>('SELECT status,attempts FROM expiries'),
+      ).toMatchObject({ status: 'pending', attempts: 1 });
+      malformed = false;
+      await access.expire(120100);
+      expect(db.one<{ status: string }>('SELECT status FROM expiries')?.status).toBe('done');
+      expect(fetcher.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+  it('does not confirm revocation when its readback response is malformed', async () => {
+    const db = memory();
+    let revoked = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
+      if (options?.method === 'DELETE') {
+        revoked = true;
+        return new Response(null, { status: 204 });
+      }
+      if (revoked) return new Response('{}');
+      if (String(url).includes('shared_servers'))
+        return new Response(
+          '<MediaContainer><SharedServer><Section id="1" shared="1"/></SharedServer></MediaContainer>',
+        );
+      return new Response(
+        String(url).includes('/api/users/')
+          ? '<MediaContainer><User id="11"><Server id="101" machineIdentifier="synthetic"/></User></MediaContainer>'
+          : '<MediaContainer/>',
+      );
+    });
+    try {
+      const access = new Access(
+        db,
+        () => new Plex('synthetic-token', 'test-client', fetcher),
+        () => 'synthetic',
+      );
+      await expect(access.change('11', null, '101')).rejects.toMatchObject({ code: 'PLEX_SCHEMA' });
+      expect(db.all("SELECT * FROM audit WHERE result='confirmed'")).toHaveLength(0);
+      expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'DELETE')).toHaveLength(
+        1,
+      );
+    } finally {
+      db.close();
+    }
+  });
   it('revokes only the selected server share; retry observes absence before deletion', async () => {
     const db = memory(),
       plex = new MockPlex(),

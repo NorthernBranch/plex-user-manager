@@ -11,6 +11,7 @@ An MIT-licensed, self-hosted administrator PWA for Plex library access and outag
 - Bootstrap-protected administrator setup, independent Plex PIN sign-in, owned-server selection and identity verification.
 - Searchable/sortable users and pending invitations, library editors, server-specific revocation, bulk preview with individual results, administrator notes and presets.
 - Content-rating and allowed-label restrictions for shared accounts with Plex Pass, with explicit confirmation of account-wide scope.
+- Prefilled restriction editing, before/after previews and rejection of stale changes; unsupported existing filter syntax stays in Plex Web.
 - Persisted access expiries that process overdue work on startup, audit history and reconciliation with Plex before and after changes.
 - Backend monitoring with configurable thresholds, recovery confirmation, maintenance windows, recipients and plain-text templates.
 - Persisted incidents, observed downtime, unknown restart gaps and separate SMTP deliveries with bounded retries and visible failures.

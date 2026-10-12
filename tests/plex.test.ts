@@ -34,6 +34,64 @@ describe('Plex adapter validation', () => {
     await expect(plex.ownedServers()).rejects.toMatchObject({ code: 'PLEX_SCHEMA' });
     await expect(plex.account()).rejects.toMatchObject({ code: 'PLEX_SCHEMA' });
   });
+  it.each([
+    {},
+    { User: [] },
+    { MediaContainer: null },
+    { MediaContainer: [] },
+    { MediaContainer: { size: 1 } },
+    { MediaContainer: { size: 'invalid', User: [] } },
+    { MediaContainer: { size: 0, Error: { message: 'Synthetic error' } } },
+    { MediaContainer: { size: 0, Error: 'Synthetic error' } },
+    { MediaContainer: { size: 0, unexpected: true } },
+    { MediaContainer: { User: [{ id: '11', Server: { id: '101' } }] } },
+  ])('rejects an untrusted user/invitation collection %#', async (invalid) => {
+    for (const failedEndpoint of ['users', 'invites']) {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (url) =>
+          respond(String(url).includes(`/api/${failedEndpoint}`) ? invalid : '<MediaContainer/>'),
+        );
+      await expect(new Plex('', 'test-client', fetcher).users('synthetic')).rejects.toMatchObject({
+        code: 'PLEX_SCHEMA',
+      });
+    }
+  });
+  it.each(['<MediaContainer/>', '<MediaContainer size="0"/>', { MediaContainer: { size: 0 } }])(
+    'accepts an explicitly empty, valid collection %#',
+    async (empty) => {
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => respond(empty));
+      expect(await new Plex('', 'test-client', fetcher).users('synthetic')).toEqual([]);
+    },
+  );
+  it('rejects absent library/share envelopes and ambiguous flags', async () => {
+    const fixtures = [{}, { MediaContainer: {} }, { MediaContainer: { Server: { size: 1 } } }];
+    for (const invalid of fixtures) {
+      const plex = new Plex(
+        '',
+        'test-client',
+        vi.fn<typeof fetch>().mockResolvedValue(respond(invalid)),
+      );
+      await expect(plex.libraries('synthetic')).rejects.toMatchObject({ code: 'PLEX_SCHEMA' });
+    }
+    for (const detail of [
+      {},
+      { MediaContainer: {} },
+      { MediaContainer: { SharedServer: { Section: { id: '1', shared: 'unknown' } } } },
+    ]) {
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+        if (String(url).includes('shared_servers')) return respond(detail);
+        if (String(url).includes('/api/users/'))
+          return respond(
+            '<MediaContainer><User id="11"><Server id="101" machineIdentifier="synthetic"/></User></MediaContainer>',
+          );
+        return respond('<MediaContainer/>');
+      });
+      await expect(new Plex('', 'test-client', fetcher).users('synthetic')).rejects.toMatchObject({
+        code: 'PLEX_SCHEMA',
+      });
+    }
+  });
   it('rejects proxy success and mismatched server identities', async () => {
     const server = {
       id: 'synthetic',

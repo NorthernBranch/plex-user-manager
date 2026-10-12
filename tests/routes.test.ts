@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import { randomBytes } from 'node:crypto';
 import { createApp } from '../server/app.js';
@@ -138,16 +138,25 @@ describe('authorised integration routes', () => {
         television: { ratings: [], labels: [] },
         music: { labels: [] },
       };
+      const expectedFilters = { filterMovies: '', filterTelevision: '', filterMusic: '' };
       await f
         .write('post', '/api/users/11/restrictions', { values, confirmAccountScope: false })
         .expect(400);
       f.plex.pass = false;
       await f
-        .write('post', '/api/users/11/restrictions', { values, confirmAccountScope: true })
+        .write('post', '/api/users/11/restrictions', {
+          values,
+          expectedFilters,
+          confirmAccountScope: true,
+        })
         .expect(403);
       f.plex.pass = true;
       await f
-        .write('post', '/api/users/11/restrictions', { values, confirmAccountScope: true })
+        .write('post', '/api/users/11/restrictions', {
+          values,
+          expectedFilters,
+          confirmAccountScope: true,
+        })
         .expect(502); // Mock does not confirm filter change.
       await f
         .write('delete', '/api/users/11/access', { shareId: '101', confirm: true })
@@ -196,5 +205,32 @@ describe('authorised integration routes', () => {
       filtersMatch({ ...expected, filterMovies: 'label=Sample|contentRating=PG%2CG' }, expected),
     ).toBe(true);
     expect(filtersMatch({ ...expected, filterMovies: '' }, expected)).toBe(false);
+  });
+  it('rejects a restriction preview that became stale before mutation', async () => {
+    const f = await fixture();
+    try {
+      f.store.setSecret('server', {
+        id: 'synthetic',
+        name: 'Sample',
+        url: 'http://localhost:32400',
+        token: 'synthetic-token',
+      });
+      f.plex.shares.synthetic[0].filters = { filterMovies: 'contentRating=PG' };
+      const mutation = vi.spyOn(f.plex, 'restrictions');
+      await f
+        .write('post', '/api/users/11/restrictions', {
+          confirmAccountScope: true,
+          expectedFilters: { filterMovies: '', filterTelevision: '', filterMusic: '' },
+          values: {
+            movies: { ratings: ['G'], labels: [] },
+            television: { ratings: [], labels: [] },
+            music: { labels: [] },
+          },
+        })
+        .expect(409);
+      expect(mutation).not.toHaveBeenCalled();
+    } finally {
+      f.store.close();
+    }
   });
 });

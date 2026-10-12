@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import { Badge, Field, Libraries } from './components';
 import type { Notice, Snapshot, User } from './types';
+import { RestrictionsEditor } from './restrictions-editor';
 export function UserEditor({
   user,
   data,
@@ -139,49 +140,24 @@ export function UserEditor({
           </div>
         ))}
       </dl>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const f = new FormData(e.currentTarget),
-            split = (key: string) =>
-              String(f.get(key) ?? '')
-                .split(',')
-                .map((v) => v.trim())
-                .filter(Boolean);
-          if (
-            confirm(
-              'Replace these content filters for this Plex account across all your server shares?',
-            )
-          )
-            void run(async () => {
-              const result = await api(`/users/${user.id}/restrictions`, {
-                confirmAccountScope: true,
-                values: {
-                  movies: { ratings: split('movieRatings'), labels: split('movieLabels') },
-                  television: { ratings: split('tvRatings'), labels: split('tvLabels') },
-                  music: { labels: split('musicLabels') },
-                },
-              });
-              notice(result.message);
+      <RestrictionsEditor
+        filters={user.filters}
+        disabled={!restrictionsEnabled || offline || busy}
+        onApply={(values) =>
+          void run(async () => {
+            const result = await api(`/users/${user.id}/restrictions`, {
+              confirmAccountScope: true,
+              expectedFilters: {
+                filterMovies: user.filters.filterMovies ?? '',
+                filterTelevision: user.filters.filterTelevision ?? '',
+                filterMusic: user.filters.filterMusic ?? '',
+              },
+              values,
             });
-        }}
-      >
-        <fieldset disabled={!restrictionsEnabled || offline || busy}>
-          <legend>Replace filters (comma-separated values)</legend>
-          {[
-            ['movieRatings', 'Movie content ratings'],
-            ['movieLabels', 'Allowed movie labels'],
-            ['tvRatings', 'TV content ratings'],
-            ['tvLabels', 'Allowed TV labels'],
-            ['musicLabels', 'Allowed music labels'],
-          ].map(([name, label]) => (
-            <Field key={name} label={label}>
-              <input name={name} maxLength={2000} />
-            </Field>
-          ))}
-          <button className="secondary">Review & replace restrictions</button>
-        </fieldset>
-      </form>
+            notice(result.message);
+          })
+        }
+      />
       <hr />
       <button
         className="danger"

@@ -6,7 +6,7 @@ import { serializeFilters } from './filters.js';
 
 const id = z.union([z.string().min(1), z.number().int()]).transform(String);
 const flag = z
-  .union([z.boolean(), z.number(), z.string()])
+  .union([z.boolean(), z.literal(0), z.literal(1), z.enum(['0', '1', 'false', 'true'])])
   .transform((v) => v === true || v === 1 || v === '1' || v === 'true');
 const resourceSchema = z.object({
   clientIdentifier: id,
@@ -80,6 +80,44 @@ function record(value: unknown): Record<string, unknown> {
   if (!parsed.success)
     throw new AppError(502, 'PLEX_SCHEMA', 'Plex response does not match the supported API shape.');
   return parsed.data;
+}
+function mediaContainer(value: unknown): Record<string, unknown> {
+  const envelope = record(value);
+  if (!Object.hasOwn(envelope, 'MediaContainer'))
+    throw new AppError(502, 'PLEX_SCHEMA', 'Plex collection response is missing its envelope.');
+  // fast-xml-parser represents a genuine <MediaContainer/> as an empty string.
+  return envelope.MediaContainer === '' ? {} : record(envelope.MediaContainer);
+}
+function collection(parent: Record<string, unknown>, child: string): unknown[] {
+  const size = parent.size;
+  if (size !== undefined && !/^(0|[1-9]\d*)$/.test(String(size)))
+    throw new AppError(502, 'PLEX_SCHEMA', 'Plex collection size is invalid.');
+  // XML attributes are scalars. An unexpected nested element must not be mistaken
+  // for an empty list, even if the envelope claims size=0.
+  if (
+    Object.entries(parent).some(
+      ([key, value]) => key !== child && (value === null || typeof value === 'object'),
+    )
+  )
+    throw new AppError(502, 'PLEX_SCHEMA', 'Plex collection contains unsupported elements.');
+  const items = Object.hasOwn(parent, child) ? list(parent[child]) : [];
+  if (
+    (size !== undefined && Number(size) !== items.length) ||
+    (!Object.hasOwn(parent, child) &&
+      Object.keys(parent).length > 0 &&
+      (Number(size) !== 0 ||
+        Object.keys(parent).some(
+          (key) => !['size', 'friendlyName', 'identifier', 'machineIdentifier'].includes(key),
+        )))
+  )
+    throw new AppError(502, 'PLEX_SCHEMA', 'Plex collection is incomplete or unsupported.');
+  return items;
+}
+function singleChild(parent: Record<string, unknown>, child: string): Record<string, unknown> {
+  const items = collection(parent, child);
+  if (items.length !== 1)
+    throw new AppError(502, 'PLEX_SCHEMA', 'Plex response is missing its expected server record.');
+  return items[0] === '' ? {} : record(items[0]);
 }
 export class Plex implements PlexAdapter {
   constructor(
@@ -227,16 +265,9 @@ export class Plex implements PlexAdapter {
     return `https://plex.tv/api/servers/${encodeURIComponent(server)}`;
   }
   async libraries(server: string) {
-    const response = record(await this.request(this.path(server)));
-    try {
-      const container = record(response.MediaContainer ?? response);
-      const servers = list(container.Server);
-      const parent = record(servers[0] ?? container);
-      return await this.validate(z.array(librarySchema), list(parent.Section));
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError(502, 'PLEX_SCHEMA', 'Plex library response is unsupported.');
-    }
+    const container = mediaContainer(await this.request(this.path(server)));
+    const parent = singleChild(container, 'Server');
+    return this.validate(z.array(librarySchema), collection(parent, 'Section'));
   }
   async users(server: string) {
     const responses = await Promise.all([
@@ -245,26 +276,22 @@ export class Plex implements PlexAdapter {
     ]);
     const result: PlexUser[] = [];
     for (let i = 0; i < responses.length; i++) {
-      const response = record(responses[i]);
-      const container = record(
-        response.MediaContainer === '' ? {} : (response.MediaContainer ?? response),
-      );
+      const container = mediaContainer(responses[i]);
       const users = await this.validate(
         z.array(userSchema),
-        list(container[i === 0 ? 'User' : 'Invite']),
+        collection(container, i === 0 ? 'User' : 'Invite'),
       );
       for (const user of users) {
         const shares = await this.validate(z.array(shareSchema), list(user.Server));
         const share = shares.find((s) => s.machineIdentifier === server);
         if (!share) continue;
-        const detail = record(
+        const detail = mediaContainer(
           await this.request(`${this.path(server)}/shared_servers/${encodeURIComponent(share.id)}`),
         );
-        const d = record(detail.MediaContainer ?? detail),
-          shared = record(list(d.SharedServer)[0] ?? d);
+        const shared = singleChild(detail, 'SharedServer');
         const sections = await this.validate(
           z.array(z.object({ id, shared: flag })),
-          list(shared.Section),
+          collection(shared, 'Section'),
         );
         const libraries = sections.filter((s) => s.shared).map((s) => s.id);
         result.push({

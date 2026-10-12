@@ -106,7 +106,15 @@ export function registerAccessRoutes({ app, store, client, selected, access }: A
   );
   app.post('/api/users/:id/restrictions', async (req, res) => {
     const body = z
-      .object({ confirmAccountScope: z.literal(true), values: restrictionsSchema })
+      .object({
+        confirmAccountScope: z.literal(true),
+        values: restrictionsSchema,
+        expectedFilters: z.object({
+          filterMovies: z.string().max(10000),
+          filterTelevision: z.string().max(10000),
+          filterMusic: z.string().max(10000),
+        }),
+      })
       .parse(req.body);
     await access.exclusive(async () => {
       const adapter = client(),
@@ -122,6 +130,12 @@ export function registerAccessRoutes({ app, store, client, selected, access }: A
           403,
           'PLEX_PASS',
           'Content restrictions require Plex Pass on the owner account.',
+        );
+      if (!filtersMatch(user.filters, body.expectedFilters))
+        throw new AppError(
+          409,
+          'CHANGED',
+          'Content filters changed since this editor opened. Refresh and preview again.',
         );
       await adapter.restrictions(user.id, body.values);
       const after = (await adapter.users(selected().id)).find((u) => u.id === user.id);

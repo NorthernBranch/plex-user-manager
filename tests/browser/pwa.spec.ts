@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import type { Restrictions } from '../../server/plex.js';
 const monitor = {
   enabled: true,
   intervalSeconds: 30,
@@ -123,4 +124,91 @@ test('public service worker cache never contains authenticated responses', async
   });
   expect(cached.some((url) => url.startsWith('/api'))).toBe(false);
   expect(cached).toContain('/offline.html');
+});
+
+async function openRestrictionEditor(page: Page, filters: Record<string, string>) {
+  await page.route('**/api/users', (route) =>
+    route.fulfill({
+      json: {
+        server: 'synthetic',
+        libraries: [{ id: '1', title: 'Sample Films', type: 'movie' }],
+        users: [
+          {
+            id: '11',
+            name: 'Sample viewer',
+            kind: 'shared',
+            shareId: '101',
+            libraries: ['1'],
+            notes: '',
+            expiry: null,
+            filters,
+          },
+        ],
+        capabilities: {
+          plexPass: true,
+          restrictionScope: 'Account sharing settings across servers.',
+        },
+      },
+    }),
+  );
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Users', exact: true }).click();
+  await page.getByRole('button', { name: 'Sample viewer', exact: true }).click();
+}
+test('restrictions prefill, preview intentional clearing and retain unchanged fields', async ({
+  page,
+}) => {
+  const filters = {
+    filterMovies: 'contentRating=G%2CPG|label=Family%20films',
+    filterTelevision: 'contentRating=TV-PG|label=Sample%20shows',
+    filterMusic: 'label=Sample%20music',
+  };
+  let mutation: { expectedFilters: Record<string, string>; values: Restrictions } | undefined;
+  await page.route('**/api/users/11/restrictions', async (route) => {
+    mutation = route.request().postDataJSON();
+    await route.fulfill({ json: { message: 'Synthetic restrictions confirmed.' } });
+  });
+  await openRestrictionEditor(page, filters);
+  await expect(page.getByLabel('Movie content ratings', { exact: true })).toHaveValue('G, PG');
+  await expect(page.getByLabel('Allowed movie labels')).toHaveValue('Family films');
+  await expect(page.getByLabel('TV content ratings', { exact: true })).toHaveValue('TV-PG');
+  await expect(page.getByLabel('Allowed TV labels')).toHaveValue('Sample shows');
+  await expect(page.getByLabel('Allowed music labels')).toHaveValue('Sample music');
+  await page.getByLabel('Movie content ratings', { exact: true }).fill('G');
+  await page.getByLabel('Allowed music labels').fill('');
+  await page.getByRole('button', { name: 'Review & replace restrictions' }).click();
+  const preview = page.getByRole('region', { name: 'Restriction change preview' });
+  await expect(preview).toBeVisible();
+  await expect(preview.getByRole('row', { name: /Allowed music labels/ })).toContainText(
+    'No restriction (cleared)',
+  );
+  await expect(preview.getByRole('row', { name: /Allowed TV labels/ })).toContainText(
+    'Sample shows (unchanged)',
+  );
+  expect(mutation).toBeUndefined();
+  await page.getByLabel('TV content ratings', { exact: true }).fill('TV-G');
+  await expect(preview).not.toBeVisible();
+  await page.getByLabel('TV content ratings', { exact: true }).fill('TV-PG');
+  await page.getByRole('button', { name: 'Review & replace restrictions' }).click();
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.getByRole('button', { name: 'Apply reviewed restrictions' }).click();
+  expect(mutation).toBeUndefined();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Apply reviewed restrictions' }).click();
+  await expect.poll(() => mutation).toBeDefined();
+  expect(mutation).toMatchObject({
+    expectedFilters: filters,
+    values: {
+      movies: { ratings: ['G'], labels: ['Family films'] },
+      television: { ratings: ['TV-PG'], labels: ['Sample shows'] },
+      music: { labels: [] },
+    },
+  });
+});
+test('unsupported existing restriction syntax cannot be replaced with blank inputs', async ({
+  page,
+}) => {
+  await openRestrictionEditor(page, { filterMovies: 'contentRating!=PG' });
+  await expect(page.getByRole('alert')).toContainText('Use Plex Web');
+  await expect(page.getByRole('button', { name: 'Review & replace restrictions' })).toBeDisabled();
 });

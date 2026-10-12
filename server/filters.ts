@@ -1,4 +1,37 @@
 import type { Restrictions } from './plex.js';
+export function parseFilters(filters: Record<string, string>): Restrictions {
+  const parse = (filter: string, allowed: string[]) => {
+    const values: Record<string, string[]> = {};
+    for (const entry of filter.split('|').filter(Boolean)) {
+      const separator = entry.indexOf('=');
+      const key = entry.slice(0, separator);
+      if (separator < 1 || !allowed.includes(key) || Object.hasOwn(values, key))
+        throw new Error('Existing Plex filters cannot be safely edited here. Use Plex Web.');
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(entry.slice(separator + 1));
+      } catch {
+        throw new Error('Existing Plex filters cannot be safely edited here. Use Plex Web.');
+      }
+      const items = decoded.split(',');
+      if (
+        items.some((value) => !value || value !== value.trim() || value.length > 80) ||
+        items.length > 50
+      )
+        throw new Error('Existing Plex filters cannot be safely edited here. Use Plex Web.');
+      values[key] = items;
+    }
+    return values;
+  };
+  const movies = parse(filters.filterMovies ?? '', ['contentRating', 'label']);
+  const television = parse(filters.filterTelevision ?? '', ['contentRating', 'label']);
+  const music = parse(filters.filterMusic ?? '', ['label']);
+  return {
+    movies: { ratings: movies.contentRating ?? [], labels: movies.label ?? [] },
+    television: { ratings: television.contentRating ?? [], labels: television.label ?? [] },
+    music: { labels: music.label ?? [] },
+  };
+}
 export function serializeFilters(values: Restrictions) {
   const format = (ratings: string[], labels: string[]) =>
     [
