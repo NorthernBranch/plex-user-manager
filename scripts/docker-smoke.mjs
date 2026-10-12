@@ -1,12 +1,14 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 const platform = process.argv[2] ?? 'linux/amd64';
 const name = `plex-smoke-${randomBytes(6).toString('hex')}`,
   volume = `${name}-data`,
   directory = resolve('.cache', name),
+  keyFile = resolve(directory, 'key'),
+  bootstrapFile = resolve(directory, 'bootstrap'),
   image = 'plex-user-manager:smoke';
 const docker = (...args) =>
   execFileSync('docker', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
@@ -19,10 +21,52 @@ try {
 }
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const bootstrap = randomBytes(32).toString('hex');
-writeFileSync(resolve(directory, 'key'), randomBytes(32).toString('hex'), { mode: 0o644 });
-writeFileSync(resolve(directory, 'bootstrap'), bootstrap, { mode: 0o644 });
+writeFileSync(keyFile, randomBytes(32).toString('hex'), { mode: 0o600 });
+writeFileSync(bootstrapFile, bootstrap, { mode: 0o600 });
+// Only synthetic secrets: keep the host directory private, but allow the non-root
+// container to read each individually mounted file, even with a restrictive umask.
+chmodSync(keyFile, 0o444);
+chmodSync(bootstrapFile, 0o444);
+
+function diagnostics() {
+  try {
+    const state = JSON.parse(docker('inspect', '--format', '{{json .State}}', name));
+    process.stderr.write(
+      `Container state: ${state.Status}; exit code: ${state.ExitCode}; health: ${state.Health?.Status ?? 'unavailable'}.\n`,
+    );
+  } catch {
+    process.stderr.write('Container state is unavailable.\n');
+  }
+  try {
+    // Never print inspect environment, mount paths or arbitrary logs. Only these
+    // fixed application messages are safe to include in public CI output.
+    const messages = new Set([
+      'Plex User Manager is ready.',
+      'Startup failed. Check deployment configuration, secret files, data permissions and database key.',
+    ]);
+    const logs = spawnSync('docker', ['logs', '--tail', '20', name], { encoding: 'utf8' });
+    if (logs.error || logs.status !== 0) throw new Error('Logs unavailable.');
+    for (const line of [logs.stdout, logs.stderr].join('\n').split(/\r?\n/))
+      if (messages.has(line)) process.stderr.write(`${line}\n`);
+  } catch {
+    process.stderr.write('Application startup messages are unavailable.\n');
+  }
+}
+
+async function waitForReady(base) {
+  for (let i = 0; i < 40; i++) {
+    if (docker('inspect', '--format', '{{.State.Running}}', name) !== 'true') break;
+    try {
+      if ((await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(2000) })).ok) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error('Container did not serve /healthz successfully.');
+}
+let phase = 'image build';
 try {
   execFileSync('docker', ['build', '--platform', platform, '-t', image, '.'], { stdio: 'inherit' });
+  phase = 'container startup';
   docker('volume', 'create', volume);
   docker(
     'run',
@@ -38,8 +82,10 @@ try {
     '/tmp:rw,noexec,nosuid,size=32m',
     '-v',
     `${volume}:/data`,
-    '-v',
-    `${directory}:/run/secrets:ro`,
+    '--mount',
+    `type=bind,source=${keyFile},target=/run/secrets/key,readonly`,
+    '--mount',
+    `type=bind,source=${bootstrapFile},target=/run/secrets/bootstrap,readonly`,
     '-p',
     '127.0.0.1::3000',
     '-e',
@@ -52,18 +98,12 @@ try {
   );
   const port = docker('port', name, '3000/tcp').split(':').at(-1),
     base = `http://127.0.0.1:${port}`;
-  let ready = false;
-  for (let i = 0; i < 40; i++) {
-    try {
-      ready = (await fetch(`${base}/healthz`)).ok;
-      if (ready) break;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  assert(ready, 'Container did not become healthy.');
+  await waitForReady(base);
+  phase = 'runtime checks';
   assert.equal(docker('inspect', '--format', '{{.Config.User}}', name), '1000:1000');
   assert.equal((await fetch(`${base}/api/settings`)).status, 401);
   assert((await (await fetch(base)).text()).includes('Plex User Manager'));
+  phase = 'administrator setup';
   const setup = await fetch(`${base}/api/setup`, {
     method: 'POST',
     headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
@@ -73,12 +113,21 @@ try {
   const session = await setup.json();
   assert(session.csrf);
   assert(setup.headers.get('set-cookie').includes('HttpOnly'));
+  phase = 'persistent restart';
   docker('restart', name);
-  await new Promise((r) => setTimeout(r, 1500));
+  await waitForReady(base);
   assert.equal((await (await fetch(`${base}/api/setup/status`)).json()).initialized, true);
   process.stdout.write(
     `Docker smoke test passed for ${platform}: non-root, read-only, one-origin frontend/API, protected setup, persistent SQLite restart.\n`,
   );
+} catch {
+  diagnostics();
+  // Remote errors and assertion payloads can contain runtime data. Report only
+  // safe diagnostics, and still fail CI after cleanup.
+  process.stderr.write(
+    `Docker smoke test failed during ${phase}. Review the safe diagnostics above.\n`,
+  );
+  process.exitCode = 1;
 } finally {
   try {
     docker('rm', '-f', name);

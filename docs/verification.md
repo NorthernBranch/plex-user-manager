@@ -24,3 +24,11 @@ Local verification performed 12 October 2026. All test data is synthetic. No rea
 Tests use the built-in SQLite on locally available Node 22.20, which emits an experimental warning. The Docker base uses Node 24 LTS pinned by digest; CI selects Node 24. Browser process cleanup needed execution permissions outside the restrictive Windows sandbox; the final browser run exits successfully. See `package.json`, `scripts/local-smoke.mjs`, `scripts/worker-smoke.mjs` and `scripts/docker-smoke.mjs` for repeatable checks.
 
 Before production use, run the Docker smoke test on a Docker-capable host and validate live Plex response/payload compatibility with a disposable share. Confirm selected-server revocation preserves another share, friendship and Home membership. Test restrictions only after acknowledging account-wide scope. Test SMTP acceptance and inbox delivery. Verify DSM proxy/permissions/HTTPS, PWA installation on the target phone and real outage/recovery timing. These remaining checks are not represented as completed mocked tests.
+
+## Follow-up Docker CI failure
+
+A subsequently supplied CI log confirms that the Linux amd64 image built successfully, including the production frontend/backend build. The runtime smoke test then timed out. Its test-only secret directory was mode 0700 and owned by the host runner, so the container's UID 1000 could not traverse the mounted directory to read its secrets.
+
+The smoke test now mounts the two synthetic secret files individually and read-only, preserving the private host directory. Their test-only permissions are explicitly readable by the container regardless of the host umask. Production Compose already mounts individual secret files; its documented UID 1000 ownership and mode 0400 remain unchanged. The test also detects an exited container promptly, uses bounded readiness checks after startup and restart, and reports only safe state and fixed startup messages on failure.
+
+The compiled application smoke test now verifies file-based secret configuration. The corrected Docker runtime smoke still needs a CI rerun: the local environment continues to lack an accessible Docker daemon. This correction is not recorded as a successful container run.

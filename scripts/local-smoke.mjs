@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -11,8 +11,12 @@ const { port } = socket.address();
 await new Promise((r) => socket.close(r));
 const directory = mkdtempSync(join(tmpdir(), 'plex-local-smoke-')),
   bootstrap = randomBytes(32).toString('hex'),
+  keyFile = join(directory, 'encryption_key'),
+  bootstrapFile = join(directory, 'bootstrap_secret'),
   origin = `http://localhost:${port}`,
   base = `http://127.0.0.1:${port}`;
+writeFileSync(keyFile, randomBytes(32).toString('hex'), { mode: 0o400 });
+writeFileSync(bootstrapFile, bootstrap, { mode: 0o400 });
 let logs = '';
 const child = spawn(process.execPath, ['dist/server/index.js'], {
   env: {
@@ -20,10 +24,10 @@ const child = spawn(process.execPath, ['dist/server/index.js'], {
     PORT: String(port),
     PUBLIC_URL: origin,
     DATA_DIR: directory,
-    BOOTSTRAP_SECRET: bootstrap,
-    ENCRYPTION_KEY: randomBytes(32).toString('hex'),
-    BOOTSTRAP_SECRET_FILE: '',
-    ENCRYPTION_KEY_FILE: '',
+    BOOTSTRAP_SECRET: '',
+    ENCRYPTION_KEY: '',
+    BOOTSTRAP_SECRET_FILE: bootstrapFile,
+    ENCRYPTION_KEY_FILE: keyFile,
     TRUSTED_PROXY: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -72,7 +76,7 @@ try {
   assert.equal((await fetch(`${base}/api/settings`, { headers: { Cookie: cookie } })).status, 401);
   assert(!logs.includes(bootstrap));
   process.stdout.write(
-    'Compiled one-origin application smoke test passed: frontend, API, bootstrap, session, CSRF/logout and no-store.\n',
+    'Compiled one-origin application smoke test passed: file-mounted secret configuration, frontend, API, bootstrap, session, CSRF/logout and no-store.\n',
   );
 } finally {
   child.kill();
