@@ -63,6 +63,12 @@ async function waitForReady(base) {
   }
   throw new Error('Container did not serve /healthz successfully.');
 }
+
+function publishedUrl() {
+  const binding = docker('port', name, '3000/tcp').match(/^127\.0\.0\.1:(\d+)$/);
+  if (!binding) throw new Error('Expected a loopback-only published port.');
+  return `http://127.0.0.1:${binding[1]}`;
+}
 let phase = 'image build';
 try {
   execFileSync('docker', ['build', '--platform', platform, '-t', image, '.'], { stdio: 'inherit' });
@@ -96,8 +102,7 @@ try {
     'BOOTSTRAP_SECRET_FILE=/run/secrets/bootstrap',
     image,
   );
-  const port = docker('port', name, '3000/tcp').split(':').at(-1),
-    base = `http://127.0.0.1:${port}`;
+  let base = publishedUrl();
   await waitForReady(base);
   phase = 'runtime checks';
   assert.equal(docker('inspect', '--format', '{{.Config.User}}', name), '1000:1000');
@@ -113,10 +118,22 @@ try {
   const session = await setup.json();
   assert(session.csrf);
   assert(setup.headers.get('set-cookie').includes('HttpOnly'));
-  phase = 'persistent restart';
+  phase = 'restart readiness';
   docker('restart', name);
+  // Docker can allocate a different ephemeral host port when starting again.
+  base = publishedUrl();
   await waitForReady(base);
-  assert.equal((await (await fetch(`${base}/api/setup/status`)).json()).initialized, true);
+  phase = 'persisted administrator verification';
+  const status = await fetch(`${base}/api/setup/status`);
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).initialized, true);
+  phase = 'persisted administrator login';
+  const login = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'administrator', password: 'synthetic-password' }),
+  });
+  assert.equal(login.status, 200);
   process.stdout.write(
     `Docker smoke test passed for ${platform}: non-root, read-only, one-origin frontend/API, protected setup, persistent SQLite restart.\n`,
   );
