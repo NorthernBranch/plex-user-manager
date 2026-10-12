@@ -1,0 +1,25 @@
+{
+  "heartbeatGraceSeconds": 90,
+  "smtp": {
+    "host": "smtp.example.com",
+    "port": 587,
+    "tls": "starttls",
+    "username": "YOUR_SMTP_USERNAME",
+    "password": "YOUR_SMTP_PASSWORD",
+    "from": "alerts@example.com"
+  },
+  "monitor": {
+    "enabled": true,
+    "intervalSeconds": 30,
+    "timeoutSeconds": 10,
+    "failureSeconds": 300,
+    "recoveryCount": 2,
+    "authority": "local",
+    "recipients": [{ "email": "admin@example.com", "outage": true, "recovery": true }],
+    "maintenance": [],
+    "outageSubject": "Plex or monitored host unavailable",
+    "outageBody": "Incident {{incident}}: external heartbeat failure. First observed {{started}}. Scope: {{scope}}.",
+    "recoverySubject": "Plex monitoring heartbeat recovered",
+    "recoveryBody": "Incident {{incident}} recovered at {{recovered}}. Observed downtime {{downtime}}. Gaps excluded. Scope: {{scope}}."
+  }
+}

@@ -1,0 +1,32 @@
+services:
+  manager:
+    image: ${APP_IMAGE:-plex-user-manager:local}
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20}
+    restart: unless-stopped
+    init: true
+    user: '1000:1000'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:-https://plex-admin.example.com}
+      TRUSTED_PROXY: ${TRUSTED_PROXY:-}
+      ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+      BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+      DATA_DIR: /data
+    ports:
+      - '${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000'
+    volumes:
+      - ${DATA_DIRECTORY:-./data}:/data
+    secrets: [encryption_key, bootstrap_secret]
+    stop_grace_period: 30s
+secrets:
+  encryption_key:
+    file: ${ENCRYPTION_KEY_PATH:-./secrets/encryption_key}
+  bootstrap_secret:
+    file: ${BOOTSTRAP_SECRET_PATH:-./secrets/bootstrap_secret}

@@ -1,0 +1,23 @@
+name: Checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: node scripts/local-smoke.mjs
+      - run: node scripts/worker-smoke.mjs
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - run: npm run privacy
+      - run: node scripts/docker-smoke.mjs linux/amd64

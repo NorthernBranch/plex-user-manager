@@ -1,0 +1,10 @@
+node_modules
+dist
+.cache
+data
+secrets
+backups
+runtime
+package-lock.json
+test-results
+playwright-report

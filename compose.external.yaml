@@ -1,0 +1,27 @@
+services:
+  monitor:
+    image: ${APP_IMAGE:-plex-user-manager:local}
+    command: [node, dist/server/worker.js]
+    restart: unless-stopped
+    init: true
+    user: '1000:1000'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=32m']
+    environment:
+      DATA_DIR: /data
+      ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+      HEARTBEAT_KEY_FILE: /run/secrets/heartbeat_key
+      WORKER_CONFIG_FILE: /run/secrets/worker_config
+    ports: ['127.0.0.1:${WORKER_PORT:-3001}:3000']
+    volumes: ['${WORKER_DATA_DIRECTORY:-./data}:/data']
+    secrets: [encryption_key, heartbeat_key, worker_config]
+    stop_grace_period: 30s
+secrets:
+  encryption_key:
+    file: ${ENCRYPTION_KEY_PATH:-./secrets/encryption_key}
+  heartbeat_key:
+    file: ${HEARTBEAT_KEY_PATH:-./secrets/heartbeat_key}
+  worker_config:
+    file: ${WORKER_CONFIG_PATH:-./secrets/worker_config.json}

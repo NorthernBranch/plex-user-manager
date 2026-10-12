@@ -1,0 +1,17 @@
+.git
+.cache
+node_modules
+dist
+.env*
+data
+secrets
+backups
+runtime
+*.db*
+*.sqlite*
+*.log
+*.pem
+*.key
+worker-config.json
+test-results
+playwright-report
