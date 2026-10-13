@@ -32,8 +32,13 @@ forward-auth policy, and consistent SQLite backup/key validation. Those checks
 are limited to that installation; they do not validate access mutations or every
 Plex account response. A read-only diagnosis identified a library validation
 failure: the outer library count was compared with the number of server wrappers.
-The correction is covered by synthetic adapter and authenticated route tests;
-live verification of the deployed correction is still pending.
+The correction passed synthetic adapter and authenticated route tests, then
+read-only live library, user/share and subscription retrieval in both an isolated
+container and the updated running application. Share library IDs reconciled with
+the selected server's libraries, its identity probe passed, and the installation
+administrator confirmed that the authenticated Users page loads. The database,
+administrator and deployment keys were preserved. No live invitations, access
+changes, revocations or production SMTP tests were performed by this repair.
 
 ## Privacy scope
 
