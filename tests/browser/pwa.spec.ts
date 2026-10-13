@@ -99,6 +99,38 @@ test.beforeEach(async ({ page }) => {
     });
   });
 });
+
+test('Users explains an HTML gateway error without displaying its body', async ({ page }) => {
+  await page.route('**/api/users', (route) =>
+    route.fulfill({
+      status: 502,
+      contentType: 'text/html',
+      body: '<!DOCTYPE html><title>Synthetic gateway error</title><p>Private diagnostic</p>',
+    }),
+  );
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Users', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Gateway or server error (HTTP 502)');
+  await expect(page.getByText('Private diagnostic')).not.toBeVisible();
+});
+
+test('Users does not follow an API sign-in redirect', async ({ page }) => {
+  let signInRequests = 0;
+  await page.route('**/synthetic-sign-in', (route) => {
+    signInRequests++;
+    return route.fulfill({
+      contentType: 'text/html',
+      body: '<!DOCTYPE html><title>Sign in</title>',
+    });
+  });
+  await page.route('**/api/users', (route) =>
+    route.fulfill({ status: 302, headers: { Location: '/synthetic-sign-in' } }),
+  );
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Users', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Sign-in redirected');
+  expect(signInRequests).toBe(0);
+});
 test('communications navigation, UTC draft fields and offline controls', async ({
   page,
   context,
