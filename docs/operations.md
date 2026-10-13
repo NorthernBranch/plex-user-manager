@@ -42,6 +42,21 @@ Verify suspected failure, one confirmed incident, one logical outage per opted-i
 
 ## Troubleshooting
 
+An API error beginning with `Unexpected token '<'` indicates that a gateway or
+sign-in page reached the browser instead of JSON. The application now reports
+the HTTP status without displaying the HTML. Inspect the `/api/users` request's
+status and content type, then check the same request at the origin before
+changing credentials or retrying access mutations. A successful process health
+check does not establish that Plex account-sharing requests succeed.
+
+When a CDN replaces an origin's 502 response with its own page, check the safe
+backend error directly at the origin. Preserve authentication and certificate
+validation; do not expose the container port or disable authentication to debug
+user data. If a proxy uses forward authentication, API authentication failures
+should return 401 JSON rather than redirect fetch requests to a sign-in page.
+Recipient token routes remain separately scoped. Do not cache `/api` responses
+or replay access mutations after a gateway error.
+
 | Symptom                                            | Check                                                                                                                                                  |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Container exits immediately                        | Secret files readable by UID 1000; 64-character hex encryption key; bootstrap at least 32 characters; writable data; correct key for existing database |
