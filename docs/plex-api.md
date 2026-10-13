@@ -38,6 +38,15 @@ Restrictions use rating and allowed-label filters. The adapter does not present 
 
 Sharing endpoints are not a publicly versioned contract. They can return different shapes, reject JSON payloads in some versions or delay reconciliation. This release treats those conditions as errors/unconfirmed changes. Never read an HTTP 2xx as proof of a requested state: access edits and revocations refresh and reconcile. Invitation acceptance is controlled by the recipient, and the app reports requests as accepted by Plex with recipient acceptance still pending.
 
+For `GET /api/servers/{machineId}`, the outer `MediaContainer.size` counts
+library `Section` records within the single `Server` wrapper. Validation applies
+that count to the sections, requires exactly one server wrapper and checks its
+machine identifier when supplied. Explicitly empty libraries require a valid
+zero count and supported metadata. Unknown error elements, count mismatches and
+malformed envelopes remain errors. User and invitation collections retain their
+separate count and envelope validation; an invalid response cannot establish
+that a share is absent.
+
 GET requests have a timeout and at most three attempts; mutation requests have one attempt. Monitoring probes have exactly one timeout-bound attempt. Redirects are rejected so credentials cannot follow a redirect to another host. Remote bodies, response URLs and tokens are never included in errors or logs. Live validation still requires an owned Plex account and a disposable invited user.
 
 Communications adds no new Plex endpoints. Notification addresses/verification/preferences are app-owned and never inferred from Plex account email. Automatic welcome requires a validated pending-to-shared observation with the same account/share IDs and positive library access; changed invitation identifiers, acceptance during a monitoring gap and existing accepted users require manual welcome. This conservative fallback is explicit in the UI. Mail does not accept invitations or grant/renew access. Announcement targeting and delivery recheck the existing validated selected-server user/library adapter; malformed responses remain errors, never empty authoritative collections.

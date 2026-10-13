@@ -1,3 +1,5 @@
+import { readJsonResponse } from './response.js';
+
 let csrf = '';
 export function setCsrf(value: string) {
   csrf = value;
@@ -13,10 +15,13 @@ export async function api<T = any>(
     method,
     credentials: 'same-origin',
     cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    redirect: 'manual',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': csrf,
+    },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Request failed.');
-  return data;
+  return readJsonResponse<T>(response);
 }

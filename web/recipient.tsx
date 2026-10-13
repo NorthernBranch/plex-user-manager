@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PreferenceFields } from './contact-editor';
 import { noPreferences, type Preferences } from '../server/communication-preferences';
+import { readJsonResponse } from './response';
 type View = {
   email: string;
   verified: boolean;
@@ -23,12 +24,11 @@ export function RecipientPage({ token }: { token: string }) {
       method: 'POST',
       credentials: 'omit',
       cache: 'no-store',
-      headers: { 'Content-Type': 'application/json' },
+      redirect: 'manual',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, ...extra }),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? 'Link invalid or expired.');
-    return data;
+    return readJsonResponse<any>(response);
   }
   useEffect(() => {
     const handler = () => setOffline(!navigator.onLine);

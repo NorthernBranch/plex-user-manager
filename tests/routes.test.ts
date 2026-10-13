@@ -5,13 +5,14 @@ import { createApp } from '../server/app.js';
 import { loadConfig } from '../server/config.js';
 import { memory, MockPlex, monitorSettings } from './helpers.js';
 import { serializeFilters, filtersMatch } from '../server/filters.js';
+import { Plex, type PlexAdapter } from '../server/plex.js';
 
-async function fixture() {
+async function fixture(injected?: PlexAdapter) {
   const store = memory(),
     plex = new MockPlex(),
     bootstrap = randomBytes(32).toString('hex'),
     config = loadConfig({ ENCRYPTION_KEY: store.key, BOOTSTRAP_SECRET: bootstrap });
-  const services = createApp(store, config, plex),
+  const services = createApp(store, config, injected ?? plex),
     agent = request.agent(services.app);
   const response = await agent
     .post('/api/setup')
@@ -25,6 +26,52 @@ async function fixture() {
   return { store, plex, agent, write, ...services };
 }
 describe('authorised integration routes', () => {
+  it('loads the authenticated Users API through real adapter parsing of synthetic account responses', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/api/servers/synthetic')
+        return new Response(
+          '<MediaContainer size="3"><Server machineIdentifier="synthetic"><Section id="1" key="10" title="Sample Films" type="movie"/><Section id="2" key="20" title="Sample Shows" type="show"/><Section id="3" key="30" title="Sample Music" type="artist"/></Server></MediaContainer>',
+        );
+      if (path === '/api/users/')
+        return new Response(
+          '<MediaContainer size="1"><User id="11" username="sample-viewer"><Server id="101" machineIdentifier="synthetic"/><Server id="202" machineIdentifier="other-server"/></User></MediaContainer>',
+        );
+      if (path === '/api/invites/requested') return new Response('<MediaContainer size="0"/>');
+      if (path === '/api/servers/synthetic/shared_servers/101')
+        return new Response(
+          '<MediaContainer size="1"><SharedServer id="101" accessToken="synthetic-share-token"><Section id="1" shared="1"/><Section id="2" shared="1"/><Section id="3" shared="0"/></SharedServer></MediaContainer>',
+        );
+      if (path === '/api/v2/user') return Response.json({ subscription: { active: false } });
+      throw new Error('Unexpected synthetic request.');
+    });
+    const f = await fixture(new Plex('synthetic-account-token', 'test-client', fetcher));
+    try {
+      f.store.setSecret('server', {
+        id: 'synthetic',
+        name: 'Sample server',
+        url: 'http://localhost:32400',
+        token: 'synthetic-server-token',
+      });
+      await request(f.app).get('/api/users').expect(401);
+      expect(fetcher).not.toHaveBeenCalled();
+      const response = await f.agent.get('/api/users').expect(200).expect('Content-Type', /json/);
+      expect(response.body.libraries.map((library: { id: string }) => library.id)).toEqual([
+        '1',
+        '2',
+        '3',
+      ]);
+      expect(response.body.users).toMatchObject([
+        { id: '11', shareId: '101', libraries: ['1', '2'], kind: 'shared' },
+      ]);
+      expect(response.body.capabilities.plexPass).toBe(false);
+      expect(JSON.stringify(response.body)).not.toContain('synthetic-share-token');
+      expect(JSON.stringify(response.body)).not.toContain('synthetic-account-token');
+      expect(fetcher.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
+    } finally {
+      f.store.close();
+    }
+  });
   it('allows reconnecting the same server while retaining its active incident', async () => {
     const f = await fixture();
     try {

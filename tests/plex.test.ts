@@ -191,4 +191,58 @@ describe('Plex adapter validation', () => {
     );
     await expect(plex.libraries('synthetic')).rejects.toMatchObject({ code: 'PLEX_RESPONSE' });
   });
+
+  it('validates library size against nested sections, not the single server wrapper', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        respond(
+          '<MediaContainer size="3" friendlyName="Sample account" identifier="com.plexapp.plugins.myplex" machineIdentifier="synthetic-account"><Server name="Sample Plex Server" machineIdentifier="synthetic" owned="1"><Section id="1" key="10" title="Sample Films" type="movie"/><Section id="2" key="20" title="Sample Shows" type="show"/><Section id="3" key="30" title="Sample Music" type="artist"/></Server></MediaContainer>',
+        ),
+      );
+    expect(
+      (await new Plex('', 'test-client', fetcher).libraries('synthetic')).map((l) => l.id),
+    ).toEqual(['1', '2', '3']);
+  });
+
+  it('accepts a declared zero-library server with supported scalar metadata', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        respond(
+          '<MediaContainer size="0"><Server name="Sample Plex Server" machineIdentifier="synthetic" owned="1" address="NAS_ADDRESS" port="32400"/></MediaContainer>',
+        ),
+      );
+    expect(await new Plex('', 'test-client', fetcher).libraries('synthetic')).toEqual([]);
+  });
+
+  it.each([
+    '<MediaContainer size="2"><Server><Section id="1" key="10" title="Sample Films" type="movie"/></Server></MediaContainer>',
+    '<MediaContainer size="invalid"><Server><Section id="1" key="10" title="Sample Films" type="movie"/></Server></MediaContainer>',
+    '<MediaContainer size="0"/>',
+    '<MediaContainer size="0"><Server name="Sample Plex Server"><Error message="Synthetic error"/></Server></MediaContainer>',
+    '<MediaContainer size="0"><Server name="Sample Plex Server" error="Synthetic error"/></MediaContainer>',
+    '<MediaContainer size="0"><Server name="First server"/><Server name="Second server"/></MediaContainer>',
+  ])(
+    'rejects malformed or incomplete library collections after correcting size semantics %#',
+    async (data) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(respond(data));
+      await expect(
+        new Plex('', 'test-client', fetcher).libraries('synthetic'),
+      ).rejects.toMatchObject({ code: 'PLEX_SCHEMA' });
+    },
+  );
+
+  it('rejects a library response for another server', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        respond(
+          '<MediaContainer size="0"><Server machineIdentifier="other-server"/></MediaContainer>',
+        ),
+      );
+    await expect(new Plex('', 'test-client', fetcher).libraries('synthetic')).rejects.toMatchObject(
+      { code: 'PLEX_IDENTITY' },
+    );
+  });
 });
