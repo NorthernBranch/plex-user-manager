@@ -1,20 +1,20 @@
 # Verification record
 
-Updated 13 October 2026 for the 0.2.0 API response-handling update. Automated checks use synthetic data only; no real Plex sign-in, invitations, access changes or external email are performed by those checks.
+Updated 13 October 2026 for the 0.2.0 library-count validation and API response-handling fixes. Automated checks use synthetic data only; no real Plex sign-in, invitations, access changes or external email are performed by those checks.
 
 ## Local verification
 
-| Check                        | Result and scope                                                                                                                                                                                                                                                      |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Prettier, TypeScript, ESLint | Required formatting, strict frontend/backend type checks and lint                                                                                                                                                                                                     |
-| Unit/integration suite       | 124 tests covering access/auth/monitoring, schema preservation/rollback, communications/expiry persistence and SMTP ambiguity, plus HTML gateway errors, authentication redirects, invalid JSON and prevention of automatic mutation retries                          |
-| Browser suite                | 18 desktop/mobile Chromium checks: layout, dialog/access editor, restriction preview/prefill, offline mutation blocking, static-only caching, Communications navigation, scanner-safe fragments, HTML gateway errors and API redirects; authenticated APIs are mocked |
-| Production build             | Compiled backend and React frontend                                                                                                                                                                                                                                   |
-| Compiled app smoke           | One-origin frontend/API, file secrets, bootstrap/session persistence across a real process restart, CSRF/logout and no-store                                                                                                                                          |
-| Compiled worker smoke        | Signed heartbeat/forgery rejection, independent persisted incidents/queue, restart gaps and recovery without contacting the NAS; SMTP targets a closed loopback port                                                                                                  |
-| Test SMTP                    | Loopback SMTP service confirms individual outage and announcement envelopes, isolated recipients and queue acceptance; no real recipients                                                                                                                             |
-| Privacy                      | Current repository files and generated text checked; synthetic desktop/mobile screenshots inspected separately                                                                                                                                                        |
-| Local Docker smoke           | Blocked: Docker CLI exists but the local Linux engine pipe is unavailable. No local container execution is claimed                                                                                                                                                    |
+| Check                        | Result and scope                                                                                                                                                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Prettier, TypeScript, ESLint | Required formatting, strict frontend/backend type checks and lint                                                                                                                                                                                                                          |
+| Unit/integration suite       | 134 tests covering access/auth/monitoring, schema preservation/rollback, communications/expiry persistence and SMTP ambiguity, plus library-count semantics, authenticated Users routing through synthetic adapter responses, HTML gateway errors, redirects and mutation retry prevention |
+| Browser suite                | 18 desktop/mobile Chromium checks: layout, dialog/access editor, restriction preview/prefill, offline mutation blocking, static-only caching, Communications navigation, scanner-safe fragments, HTML gateway errors and API redirects; authenticated APIs are mocked                      |
+| Production build             | Compiled backend and React frontend                                                                                                                                                                                                                                                        |
+| Compiled app smoke           | One-origin frontend/API, file secrets, bootstrap/session persistence across a real process restart, CSRF/logout and no-store                                                                                                                                                               |
+| Compiled worker smoke        | Signed heartbeat/forgery rejection, independent persisted incidents/queue, restart gaps and recovery without contacting the NAS; SMTP targets a closed loopback port                                                                                                                       |
+| Test SMTP                    | Loopback SMTP service confirms individual outage and announcement envelopes, isolated recipients and queue acceptance; no real recipients                                                                                                                                                  |
+| Privacy                      | Current repository files and generated text checked; synthetic desktop/mobile screenshots inspected separately                                                                                                                                                                             |
+| Local Docker smoke           | Blocked: Docker CLI exists but the local Linux engine pipe is unavailable. No local container execution is claimed                                                                                                                                                                         |
 
 See `package.json` for repeatable commands: `npm run check`, `npm run test:browser`, `npm run privacy`, and the compiled-process/Docker smoke scripts. The pinned Node 24 LTS Docker image and lockfile remain unchanged except the application version. Local execution uses Node 22.20, whose built-in SQLite emits an experimental warning; CI uses Node 24.
 
@@ -30,8 +30,10 @@ Separate manual checks on a private installation exercised owner PIN sign-in,
 owned-server selection, backend Plex identity probes, HTTPS, an administrator-only
 forward-auth policy, and consistent SQLite backup/key validation. Those checks
 are limited to that installation; they do not validate access mutations or every
-Plex account response. User retrieval is being investigated after an HTML 502
-gateway error, so successful live user-list compatibility is not yet claimed.
+Plex account response. A read-only diagnosis identified a library validation
+failure: the outer library count was compared with the number of server wrappers.
+The correction is covered by synthetic adapter and authenticated route tests;
+live verification of the deployed correction is still pending.
 
 ## Privacy scope
 

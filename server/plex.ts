@@ -88,8 +88,28 @@ function mediaContainer(value: unknown): Record<string, unknown> {
   // fast-xml-parser represents a genuine <MediaContainer/> as an empty string.
   return envelope.MediaContainer === '' ? {} : record(envelope.MediaContainer);
 }
-function collection(parent: Record<string, unknown>, child: string): unknown[] {
-  const size = parent.size;
+const collectionMetadata = ['size', 'friendlyName', 'identifier', 'machineIdentifier'];
+const libraryServerMetadata = [
+  ...collectionMetadata,
+  'name',
+  'address',
+  'port',
+  'version',
+  'scheme',
+  'host',
+  'localAddresses',
+  'createdAt',
+  'updatedAt',
+  'owned',
+  'synced',
+  'searchEnabled',
+];
+function collection(
+  parent: Record<string, unknown>,
+  child: string,
+  size: unknown = parent.size,
+  emptyMetadata = collectionMetadata,
+): unknown[] {
   if (size !== undefined && !/^(0|[1-9]\d*)$/.test(String(size)))
     throw new AppError(502, 'PLEX_SCHEMA', 'Plex collection size is invalid.');
   // XML attributes are scalars. An unexpected nested element must not be mistaken
@@ -105,10 +125,7 @@ function collection(parent: Record<string, unknown>, child: string): unknown[] {
     (size !== undefined && Number(size) !== items.length) ||
     (!Object.hasOwn(parent, child) &&
       Object.keys(parent).length > 0 &&
-      (Number(size) !== 0 ||
-        Object.keys(parent).some(
-          (key) => !['size', 'friendlyName', 'identifier', 'machineIdentifier'].includes(key),
-        )))
+      (Number(size) !== 0 || Object.keys(parent).some((key) => !emptyMetadata.includes(key))))
   )
     throw new AppError(502, 'PLEX_SCHEMA', 'Plex collection is incomplete or unsupported.');
   return items;
@@ -265,9 +282,20 @@ export class Plex implements PlexAdapter {
     return `https://plex.tv/api/servers/${encodeURIComponent(server)}`;
   }
   async libraries(server: string) {
-    const container = mediaContainer(await this.request(this.path(server)));
+    // This endpoint's outer size counts Sections inside its one Server, not
+    // Server records. Keep the count check, but apply it at the correct level.
+    const { size, ...container } = mediaContainer(await this.request(this.path(server)));
     const parent = singleChild(container, 'Server');
-    return this.validate(z.array(librarySchema), collection(parent, 'Section'));
+    if (parent.machineIdentifier !== undefined && parent.machineIdentifier !== server)
+      throw new AppError(
+        502,
+        'PLEX_IDENTITY',
+        'Library response identifies a different Plex server.',
+      );
+    return this.validate(
+      z.array(librarySchema),
+      collection(parent, 'Section', size, libraryServerMetadata),
+    );
   }
   async users(server: string) {
     const responses = await Promise.all([
